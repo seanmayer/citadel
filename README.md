@@ -8,6 +8,7 @@
 - Loads worktrees via `git worktree list --porcelain`
 - Scrolls through worktrees with keyboard navigation
 - Shows selected worktree details, including branch, commit, current-worktree status, and optional dirty state
+- Lets you create a branch for detached or branchless worktrees
 - Opens a command mode to run raw Git commands like `git status`, `git fetch`, or `git log --oneline -5`
 - Displays command output directly inside the TUI
 
@@ -35,6 +36,7 @@ gwtui
 
 - `up` / `k`: move selection up
 - `down` / `j`: move selection down
+- `b`: create a branch for the selected detached or branchless worktree
 - `enter`: open command mode or run the command
 - `r`: refresh worktrees
 - `esc`: leave command mode or output view

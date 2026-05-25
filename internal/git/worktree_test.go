@@ -51,3 +51,61 @@ prunable
 		t.Fatalf("worktrees[2].Prunable = false, want true")
 	}
 }
+
+func TestWorktreeBranchHelpers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		worktree        Worktree
+		wantHasBranch   bool
+		wantCanCreate   bool
+		wantBranchLabel string
+	}{
+		{
+			name:            "named branch",
+			worktree:        Worktree{Branch: "main"},
+			wantHasBranch:   true,
+			wantCanCreate:   false,
+			wantBranchLabel: "main",
+		},
+		{
+			name:            "detached",
+			worktree:        Worktree{Branch: "detached", IsDetached: true},
+			wantHasBranch:   false,
+			wantCanCreate:   true,
+			wantBranchLabel: "detached",
+		},
+		{
+			name:            "branchless",
+			worktree:        Worktree{},
+			wantHasBranch:   false,
+			wantCanCreate:   true,
+			wantBranchLabel: "none",
+		},
+		{
+			name:            "bare",
+			worktree:        Worktree{IsBare: true},
+			wantHasBranch:   false,
+			wantCanCreate:   false,
+			wantBranchLabel: "none",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := tt.worktree.HasNamedBranch(); got != tt.wantHasBranch {
+				t.Fatalf("HasNamedBranch() = %v, want %v", got, tt.wantHasBranch)
+			}
+			if got := tt.worktree.CanCreateBranch(); got != tt.wantCanCreate {
+				t.Fatalf("CanCreateBranch() = %v, want %v", got, tt.wantCanCreate)
+			}
+			if got := tt.worktree.BranchDisplay(); got != tt.wantBranchLabel {
+				t.Fatalf("BranchDisplay() = %q, want %q", got, tt.wantBranchLabel)
+			}
+		})
+	}
+}

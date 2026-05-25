@@ -23,6 +23,25 @@ type Worktree struct {
 	Prunable   bool
 }
 
+func (w Worktree) HasNamedBranch() bool {
+	return w.Branch != "" && !w.IsDetached
+}
+
+func (w Worktree) CanCreateBranch() bool {
+	return !w.IsBare && !w.HasNamedBranch()
+}
+
+func (w Worktree) BranchDisplay() string {
+	switch {
+	case w.HasNamedBranch():
+		return w.Branch
+	case w.IsDetached:
+		return "detached"
+	default:
+		return "none"
+	}
+}
+
 type Runner interface {
 	CombinedOutput(ctx context.Context, dir string, name string, args ...string) ([]byte, error)
 }

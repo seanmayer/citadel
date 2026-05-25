@@ -18,6 +18,7 @@ type Mode string
 const (
 	ModeList    Mode = "list"
 	ModeCommand Mode = "command"
+	ModeCreate  Mode = "create-branch"
 	ModeOutput  Mode = "output"
 	ModeHelp    Mode = "help"
 )
@@ -32,6 +33,7 @@ type ViewModel struct {
 	Top           int
 	Config        config.Config
 	InputView     string
+	BranchInput   string
 	OutputView    string
 	LastCommand   string
 	StatusMessage string
@@ -80,8 +82,8 @@ func (r Renderer) renderListPane(vm ViewModel) string {
 			row := compactPath(worktree.Path)
 
 			meta := make([]string, 0, 3)
-			if vm.Config.UI.ShowBranch && worktree.Branch != "" {
-				meta = append(meta, worktree.Branch)
+			if vm.Config.UI.ShowBranch {
+				meta = append(meta, worktree.BranchDisplay())
 			}
 			if vm.Config.UI.ShowCommitHash && worktree.Head != "" {
 				meta = append(meta, git.ShortHash(worktree.Head))
@@ -118,7 +120,7 @@ func (r Renderer) renderDetailPane(vm ViewModel) string {
 		worktree := vm.Worktrees[vm.Selected]
 		lines := []string{
 			r.detailLine("path", worktree.Path),
-			r.detailLine("branch", fallbackValue(worktree.Branch, "detached")),
+			r.detailLine("branch", worktree.BranchDisplay()),
 			r.detailLine("commit", fallbackValue(worktree.Head, "unknown")),
 			r.detailLine("current", yesNo(worktree.IsCurrent)),
 		}
@@ -128,6 +130,9 @@ func (r Renderer) renderDetailPane(vm ViewModel) string {
 				dirty = yesNo(worktree.IsDirty)
 			}
 			lines = append(lines, r.detailLine("dirty", dirty))
+		}
+		if worktree.CanCreateBranch() && vm.Mode == ModeList {
+			lines = append(lines, "", r.styles.Subtle.Render("Press b to create a branch for this worktree."))
 		}
 		content = strings.Join(lines, "\n")
 	}
@@ -139,6 +144,14 @@ func (r Renderer) renderDetailPane(vm ViewModel) string {
 				vm.InputView,
 		)
 		content = content + "\n\n" + commandPanel
+	}
+	if vm.Mode == ModeCreate {
+		branchPanel := r.styles.CommandBox.Render(
+			r.styles.Label.Render("Create Branch") + "\n" +
+				r.styles.Subtle.Render("Type a branch name for the selected worktree.") + "\n\n" +
+				vm.BranchInput,
+		)
+		content = content + "\n\n" + branchPanel
 	}
 
 	return r.styles.Panel.Width(panelWidths(vm.Width)[1]).Render(title + "\n\n" + content)
@@ -158,6 +171,7 @@ func (r Renderer) renderHelp(vm ViewModel) string {
 		"",
 		r.helpLine(r.keys.Up),
 		r.helpLine(r.keys.Down),
+		r.helpLine(r.keys.Create),
 		r.helpLine(r.keys.Enter),
 		r.helpLine(r.keys.Refresh),
 		r.helpLine(r.keys.Back),

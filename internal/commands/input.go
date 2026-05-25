@@ -13,9 +13,13 @@ type InputModel struct {
 }
 
 func NewInputModel(defaultCommand string) *InputModel {
+	return NewPromptInputModel("> ", defaultCommand, defaultCommand)
+}
+
+func NewPromptInputModel(prompt string, placeholder string, defaultCommand string) *InputModel {
 	model := textinput.New()
-	model.Prompt = "> "
-	model.Placeholder = defaultCommand
+	model.Prompt = prompt
+	model.Placeholder = placeholder
 	model.SetValue(defaultCommand)
 	model.CursorEnd()
 	model.CharLimit = 512
@@ -36,6 +40,11 @@ func (m *InputModel) Blur() {
 
 func (m *InputModel) Reset() {
 	m.model.SetValue(m.defaultCommand)
+	m.model.CursorEnd()
+}
+
+func (m *InputModel) SetValue(value string) {
+	m.model.SetValue(value)
 	m.model.CursorEnd()
 }
 

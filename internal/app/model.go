@@ -30,8 +30,9 @@ type worktreesLoadedMsg struct {
 }
 
 type commandFinishedMsg struct {
-	result commands.Result
-	err    error
+	result           commands.Result
+	err              error
+	refreshOnSuccess bool
 }
 
 type Model struct {
@@ -50,6 +51,7 @@ type Model struct {
 	renderer            ui.Renderer
 	keys                ui.KeyMap
 	commandInput        *commands.InputModel
+	branchInput         *commands.InputModel
 	outputViewport      viewport.Model
 	lastCommand         string
 	statusMessage       string
@@ -68,6 +70,7 @@ func New(cfg config.Config, gitService GitService, commandService CommandService
 		renderer:            ui.NewRenderer(cfg),
 		keys:                keys,
 		commandInput:        commands.NewInputModel(cfg.DefaultCommand),
+		branchInput:         commands.NewPromptInputModel("branch> ", "feature/my-branch", ""),
 		outputViewport:      viewport.New(80, 20),
 	}
 }
@@ -99,7 +102,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selected = len(m.worktrees) - 1
 		}
 		m.ensureSelectionVisible()
-		m.statusMessage = fmt.Sprintf("Loaded %d worktree(s)", len(m.worktrees))
+		if m.state != ui.ModeOutput {
+			m.statusMessage = fmt.Sprintf("Loaded %d worktree(s)", len(m.worktrees))
+		}
 		m.errorMessage = ""
 		return m, nil
 	case commandFinishedMsg:
@@ -116,15 +121,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.errorMessage = msg.err.Error()
 		}
 		m.statusMessage = "Command finished."
+		if msg.err == nil && msg.refreshOnSuccess {
+			m.statusMessage = "Branch created."
+		}
 		m.state = ui.ModeOutput
 		m.outputViewport.SetContent(msg.result.Output)
 		m.outputViewport.GotoTop()
+		if msg.err == nil && msg.refreshOnSuccess {
+			return m, m.loadWorktreesCmd()
+		}
 		return m, nil
 	}
 
 	switch m.state {
 	case ui.ModeCommand:
 		return m.updateCommand(msg)
+	case ui.ModeCreate:
+		return m.updateCreateBranch(msg)
 	case ui.ModeOutput:
 		return m.updateOutput(msg)
 	case ui.ModeHelp:
@@ -145,6 +158,7 @@ func (m *Model) View() string {
 		Top:           m.top,
 		Config:        m.config,
 		InputView:     m.commandInput.View(),
+		BranchInput:   m.branchInput.View(),
 		OutputView:    m.outputViewport.View(),
 		LastCommand:   m.lastCommand,
 		StatusMessage: m.statusMessage,
@@ -182,6 +196,27 @@ func (m *Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ensureSelectionVisible()
 		}
 		return m, nil
+	case key.Matches(keyMsg, m.keys.Create):
+		worktree, ok := m.selectedWorktree()
+		if !ok {
+			return m, nil
+		}
+		if worktree.IsBare {
+			m.statusMessage = "Branch was not created."
+			m.errorMessage = "Cannot create a branch for a bare worktree."
+			return m, nil
+		}
+		if worktree.HasNamedBranch() {
+			m.statusMessage = "Branch was not created."
+			m.errorMessage = fmt.Sprintf("Selected worktree already has branch %q.", worktree.Branch)
+			return m, nil
+		}
+		m.branchInput.Reset()
+		m.branchInput.SetWidth(m.commandInputWidth())
+		m.state = ui.ModeCreate
+		m.statusMessage = "Create branch mode."
+		m.errorMessage = ""
+		return m, m.branchInput.Focus()
 	case key.Matches(keyMsg, m.keys.Enter):
 		if len(m.worktrees) == 0 {
 			return m, nil
@@ -220,11 +255,50 @@ func (m *Model) updateCommand(msg tea.Msg) (tea.Model, tea.Cmd) {
 			raw := m.commandInput.ResolvedValue()
 			m.statusMessage = "Running command..."
 			m.errorMessage = ""
-			return m, m.executeCommandCmd(worktree.Path, raw)
+			return m, m.executeCommandCmd(worktree.Path, raw, false)
 		}
 	}
 
 	cmd := m.commandInput.Update(msg)
+	return m, cmd
+}
+
+func (m *Model) updateCreateBranch(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch {
+		case keyMsg.Type == tea.KeyCtrlC:
+			return m, tea.Quit
+		case key.Matches(keyMsg, m.keys.Back):
+			m.branchInput.Blur()
+			m.state = ui.ModeList
+			m.errorMessage = ""
+			m.statusMessage = "Returned to worktree list."
+			return m, nil
+		case key.Matches(keyMsg, m.keys.Help):
+			m.previousState = m.state
+			m.state = ui.ModeHelp
+			return m, nil
+		case key.Matches(keyMsg, m.keys.Enter):
+			worktree, ok := m.selectedWorktree()
+			if !ok {
+				return m, nil
+			}
+
+			branchName := m.branchInput.Value()
+			if branchName == "" {
+				m.statusMessage = "Branch was not created."
+				m.errorMessage = "Branch name is empty."
+				return m, nil
+			}
+
+			raw := fmt.Sprintf("git switch -c %q", branchName)
+			m.statusMessage = "Creating branch..."
+			m.errorMessage = ""
+			return m, m.executeCommandCmd(worktree.Path, raw, true)
+		}
+	}
+
+	cmd := m.branchInput.Update(msg)
 	return m, cmd
 }
 
@@ -280,21 +354,23 @@ func (m *Model) loadWorktreesCmd() tea.Cmd {
 	}
 }
 
-func (m *Model) executeCommandCmd(worktreePath string, raw string) tea.Cmd {
+func (m *Model) executeCommandCmd(worktreePath string, raw string, refreshOnSuccess bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 
 		result, err := m.commandService.Execute(ctx, worktreePath, raw)
 		return commandFinishedMsg{
-			result: result,
-			err:    err,
+			result:           result,
+			err:              err,
+			refreshOnSuccess: refreshOnSuccess,
 		}
 	}
 }
 
 func (m *Model) resizeComponents() {
 	m.commandInput.SetWidth(m.commandInputWidth())
+	m.branchInput.SetWidth(m.commandInputWidth())
 
 	outputWidth := m.width - 8
 	outputHeight := m.height - 8
