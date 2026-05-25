@@ -1,0 +1,11 @@
+default_command: "git status"
+
+keybindings:
+  refresh: "r"
+  quit: "q"
+  help: "?"
+
+ui:
+  show_dirty_status: true
+  show_commit_hash: true
+  show_branch: true
