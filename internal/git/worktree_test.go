@@ -32,6 +32,9 @@ prunable
 	if worktrees[0].Path != "/tmp/repo" {
 		t.Fatalf("worktrees[0].Path = %q, want /tmp/repo", worktrees[0].Path)
 	}
+	if worktrees[0].CommitHash != "0123456789abcdef" {
+		t.Fatalf("worktrees[0].CommitHash = %q, want 0123456789abcdef", worktrees[0].CommitHash)
+	}
 	if worktrees[0].Branch != "main" {
 		t.Fatalf("worktrees[0].Branch = %q, want main", worktrees[0].Branch)
 	}
