@@ -9,13 +9,14 @@ import (
 )
 
 type KeyMap struct {
-	Up      key.Binding
-	Down    key.Binding
-	Enter   key.Binding
-	Refresh key.Binding
-	Back    key.Binding
-	Help    key.Binding
-	Quit    key.Binding
+	Up           key.Binding
+	Down         key.Binding
+	Enter        key.Binding
+	Refresh      key.Binding
+	FetchRefresh key.Binding
+	Back         key.Binding
+	Help         key.Binding
+	Quit         key.Binding
 }
 
 func NewKeyMap(cfg config.Keybindings) KeyMap {
@@ -36,6 +37,10 @@ func NewKeyMap(cfg config.Keybindings) KeyMap {
 			key.WithKeys(cfg.Refresh),
 			key.WithHelp(cfg.Refresh, "refresh"),
 		),
+		FetchRefresh: key.NewBinding(
+			key.WithKeys(cfg.FetchRefresh),
+			key.WithHelp(cfg.FetchRefresh, "fetch + refresh"),
+		),
 		Back: key.NewBinding(
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "back"),
@@ -52,7 +57,7 @@ func NewKeyMap(cfg config.Keybindings) KeyMap {
 }
 
 func (k KeyMap) ShortHelp() string {
-	items := []key.Binding{k.Up, k.Down, k.Enter, k.Refresh, k.Back, k.Help, k.Quit}
+	items := []key.Binding{k.Up, k.Down, k.Enter, k.Refresh, k.FetchRefresh, k.Back, k.Help, k.Quit}
 	parts := make([]string, 0, len(items))
 	for _, binding := range items {
 		help := binding.Help()
