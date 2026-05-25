@@ -2,6 +2,7 @@ package git
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,14 +14,13 @@ import (
 type Worktree struct {
 	Path       string
 	Branch     string
-	Head       string
+	CommitHash string
 	IsCurrent  bool
 	IsDetached bool
 	IsBare     bool
-	IsDirty    bool
-	DirtyKnown bool
 	Locked     bool
 	Prunable   bool
+	Status     BranchStatus
 }
 
 func (w Worktree) HasNamedBranch() bool {
@@ -42,41 +42,68 @@ func (w Worktree) BranchDisplay() string {
 	}
 }
 
-type Runner interface {
-	CombinedOutput(ctx context.Context, dir string, name string, args ...string) ([]byte, error)
+type RefreshOptions struct {
+	BaseBranch string
+	Fetch      bool
 }
 
-type osRunner struct{}
+type CommandRunner interface {
+	Run(dir string, name string, args ...string) (stdout string, stderr string, exitCode int, err error)
+}
 
-func (osRunner) CombinedOutput(ctx context.Context, dir string, name string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+type execRunner struct{}
+
+func (execRunner) Run(dir string, name string, args ...string) (stdout string, stderr string, exitCode int, err error) {
+	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
-	return cmd.CombinedOutput()
+
+	var stdoutBuf bytes.Buffer
+	var stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
+	err = cmd.Run()
+	stdout = stdoutBuf.String()
+	stderr = stderrBuf.String()
+
+	if err == nil {
+		return stdout, stderr, 0, nil
+	}
+
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return stdout, stderr, exitErr.ExitCode(), nil
+	}
+
+	return stdout, stderr, -1, err
 }
 
 type Service struct {
-	runner Runner
+	runner CommandRunner
 }
 
-func NewService(runner Runner) *Service {
+func NewService(runner CommandRunner) *Service {
 	if runner == nil {
-		runner = osRunner{}
+		runner = execRunner{}
 	}
 
 	return &Service{runner: runner}
 }
 
 func (s *Service) DetectRepoRoot(ctx context.Context, cwd string) (string, error) {
-	output, err := s.runner.CombinedOutput(ctx, cwd, "git", "rev-parse", "--show-toplevel")
+	stdout, stderr, exitCode, err := s.run(ctx, cwd, "git", "rev-parse", "--show-toplevel")
 	if err != nil {
-		message := strings.TrimSpace(string(output))
+		return "", fmt.Errorf("detect repository root: %w", err)
+	}
+	if exitCode != 0 {
+		message := strings.TrimSpace(firstNonEmpty(stderr, stdout))
 		if message == "" {
-			message = err.Error()
+			message = "git rev-parse returned a non-zero exit status"
 		}
 		return "", fmt.Errorf("not inside a Git repository: %s", message)
 	}
 
-	root := strings.TrimSpace(string(output))
+	root := strings.TrimSpace(stdout)
 	if root == "" {
 		return "", errors.New("git rev-parse returned an empty repository root")
 	}
@@ -84,13 +111,30 @@ func (s *Service) DetectRepoRoot(ctx context.Context, cwd string) (string, error
 	return normalizePath(root), nil
 }
 
-func (s *Service) ListWorktrees(ctx context.Context, repoRoot string, currentWorktreePath string, showDirty bool) ([]Worktree, error) {
-	output, err := s.runner.CombinedOutput(ctx, repoRoot, "git", "worktree", "list", "--porcelain")
+func (s *Service) ListWorktrees(ctx context.Context, repoRoot string, currentWorktreePath string, options RefreshOptions) ([]Worktree, error) {
+	if options.BaseBranch == "" {
+		options.BaseBranch = "origin/main"
+	}
+
+	if options.Fetch {
+		if err := s.FetchRemoteState(ctx, repoRoot); err != nil {
+			return nil, err
+		}
+	}
+
+	stdout, stderr, exitCode, err := s.run(ctx, repoRoot, "git", "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, fmt.Errorf("load git worktrees: %w", err)
 	}
+	if exitCode != 0 {
+		message := strings.TrimSpace(firstNonEmpty(stderr, stdout))
+		if message == "" {
+			message = "git worktree list returned a non-zero exit status"
+		}
+		return nil, fmt.Errorf("load git worktrees: %s", message)
+	}
 
-	worktrees, err := ParseWorktreesPorcelain(string(output))
+	worktrees, err := ParseWorktreesPorcelain(stdout)
 	if err != nil {
 		return nil, fmt.Errorf("parse git worktrees: %w", err)
 	}
@@ -98,27 +142,53 @@ func (s *Service) ListWorktrees(ctx context.Context, repoRoot string, currentWor
 	for i := range worktrees {
 		worktrees[i].Path = normalizePath(worktrees[i].Path)
 		worktrees[i].IsCurrent = samePath(worktrees[i].Path, currentWorktreePath)
+	}
 
-		if !showDirty || worktrees[i].IsBare {
+	return s.EnrichWorktrees(ctx, worktrees, options.BaseBranch), nil
+}
+
+func (s *Service) EnrichWorktrees(ctx context.Context, worktrees []Worktree, baseBranch string) []Worktree {
+	if baseBranch == "" {
+		baseBranch = "origin/main"
+	}
+
+	enriched := make([]Worktree, len(worktrees))
+	copy(enriched, worktrees)
+
+	for i := range enriched {
+		if enriched[i].IsBare {
 			continue
 		}
 
-		dirty, err := s.isDirty(ctx, worktrees[i].Path)
-		if err != nil {
-			return nil, err
+		status, err := s.GetBranchStatus(ctx, enriched[i].Path, baseBranch)
+		enriched[i].Status = status
+		if err != nil && enriched[i].Status.Error == "" {
+			enriched[i].Status.Error = err.Error()
 		}
-
-		worktrees[i].IsDirty = dirty
-		worktrees[i].DirtyKnown = true
 	}
 
-	return worktrees, nil
+	return enriched
+}
+
+func (s *Service) FetchRemoteState(ctx context.Context, repoRoot string) error {
+	stdout, stderr, exitCode, err := s.run(ctx, repoRoot, "git", "fetch", "--prune")
+	if err != nil {
+		return fmt.Errorf("fetch remote state: %w", err)
+	}
+	if exitCode != 0 {
+		message := strings.TrimSpace(firstNonEmpty(stderr, stdout))
+		if message == "" {
+			message = "git fetch returned a non-zero exit status"
+		}
+		return fmt.Errorf("fetch remote state: %s", message)
+	}
+	return nil
 }
 
 func (s *Service) ExecuteGitCommand(ctx context.Context, worktreePath string, args []string) (string, error) {
-	output, err := s.runner.CombinedOutput(ctx, worktreePath, "git", args...)
-	text := strings.TrimRight(string(output), "\n")
-	if text == "" && err == nil {
+	stdout, stderr, exitCode, err := s.run(ctx, worktreePath, "git", args...)
+	text := strings.TrimRight(combinedText(stdout, stderr), "\n")
+	if text == "" && err == nil && exitCode == 0 {
 		text = "(no output)"
 	}
 
@@ -129,16 +199,35 @@ func (s *Service) ExecuteGitCommand(ctx context.Context, worktreePath string, ar
 		return text, fmt.Errorf("%s failed: %w", displayCommand(args), err)
 	}
 
+	if exitCode != 0 {
+		if text == "" {
+			text = fmt.Sprintf("%s exited with status %d", displayCommand(args), exitCode)
+		}
+		return text, fmt.Errorf("%s failed with exit code %d", displayCommand(args), exitCode)
+	}
+
 	return text, nil
 }
 
-func (s *Service) isDirty(ctx context.Context, worktreePath string) (bool, error) {
-	output, err := s.runner.CombinedOutput(ctx, worktreePath, "git", "status", "--porcelain")
-	if err != nil {
-		return false, fmt.Errorf("load dirty status for %q: %w", worktreePath, err)
+func (s *Service) run(ctx context.Context, dir string, name string, args ...string) (stdout string, stderr string, exitCode int, err error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return "", "", -1, err
+		}
 	}
 
-	return strings.TrimSpace(string(output)) != "", nil
+	stdout, stderr, exitCode, err = s.runner.Run(dir, name, args...)
+	if err != nil {
+		return stdout, stderr, exitCode, err
+	}
+
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return stdout, stderr, exitCode, err
+		}
+	}
+
+	return stdout, stderr, exitCode, nil
 }
 
 func ParseWorktreesPorcelain(output string) ([]Worktree, error) {
@@ -178,7 +267,7 @@ func ParseWorktreesPorcelain(output string) ([]Worktree, error) {
 		case current == nil:
 			return nil, fmt.Errorf("unexpected line before worktree header: %q", line)
 		case strings.HasPrefix(line, "HEAD "):
-			current.Head = strings.TrimSpace(strings.TrimPrefix(line, "HEAD "))
+			current.CommitHash = strings.TrimSpace(strings.TrimPrefix(line, "HEAD "))
 		case strings.HasPrefix(line, "branch "):
 			ref := strings.TrimSpace(strings.TrimPrefix(line, "branch "))
 			current.Branch = shortBranch(ref)
@@ -240,6 +329,29 @@ func samePath(a string, b string) bool {
 	}
 
 	return normalizePath(a) == normalizePath(b)
+}
+
+func combinedText(stdout string, stderr string) string {
+	stdout = strings.TrimRight(stdout, "\n")
+	stderr = strings.TrimRight(stderr, "\n")
+
+	switch {
+	case stdout == "":
+		return stderr
+	case stderr == "":
+		return stdout
+	default:
+		return stdout + "\n" + stderr
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func displayCommand(args []string) string {

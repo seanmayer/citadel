@@ -17,7 +17,7 @@ import (
 )
 
 type GitService interface {
-	ListWorktrees(ctx context.Context, repoRoot string, currentWorktreePath string, showDirty bool) ([]git.Worktree, error)
+	ListWorktrees(ctx context.Context, repoRoot string, currentWorktreePath string, options git.RefreshOptions) ([]git.Worktree, error)
 }
 
 type CommandService interface {
@@ -76,7 +76,7 @@ func New(cfg config.Config, gitService GitService, commandService CommandService
 }
 
 func (m *Model) Init() tea.Cmd {
-	return m.loadWorktreesCmd()
+	return m.loadWorktreesCmd(false)
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -128,7 +128,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.outputViewport.SetContent(msg.result.Output)
 		m.outputViewport.GotoTop()
 		if msg.err == nil && msg.refreshOnSuccess {
-			return m, m.loadWorktreesCmd()
+			return m, m.loadWorktreesCmd(false)
 		}
 		return m, nil
 	}
@@ -183,7 +183,11 @@ func (m *Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case key.Matches(keyMsg, m.keys.Refresh):
 		m.statusMessage = "Refreshing worktrees..."
 		m.errorMessage = ""
-		return m, m.loadWorktreesCmd()
+		return m, m.loadWorktreesCmd(false)
+	case key.Matches(keyMsg, m.keys.FetchRefresh):
+		m.statusMessage = "Fetching remote state and refreshing worktrees..."
+		m.errorMessage = ""
+		return m, m.loadWorktreesCmd(true)
 	case key.Matches(keyMsg, m.keys.Up):
 		if m.selected > 0 {
 			m.selected--
@@ -341,12 +345,15 @@ func (m *Model) updateHelp(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) loadWorktreesCmd() tea.Cmd {
+func (m *Model) loadWorktreesCmd(forceFetch bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		worktrees, err := m.gitService.ListWorktrees(ctx, m.repoRoot, m.currentWorktreePath, m.config.UI.ShowDirtyStatus)
+		worktrees, err := m.gitService.ListWorktrees(ctx, m.repoRoot, m.currentWorktreePath, git.RefreshOptions{
+			BaseBranch: m.config.Git.BaseBranch,
+			Fetch:      forceFetch || m.config.Git.FetchOnRefresh,
+		})
 		return worktreesLoadedMsg{
 			worktrees: worktrees,
 			err:       err,

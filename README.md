@@ -6,8 +6,9 @@
 
 - Detects the current repository root when launched inside a Git repository
 - Loads worktrees via `git worktree list --porcelain`
+- Shows per-worktree status badges for remote tracking, merge state, and dirty state
 - Scrolls through worktrees with keyboard navigation
-- Shows selected worktree details, including branch, commit, current-worktree status, and optional dirty state
+- Shows selected worktree details, including branch, commit, upstream, ahead/behind counts, merge state, and dirty state
 - Lets you create a branch for detached or branchless worktrees
 - Opens a command mode to run raw Git commands like `git status`, `git fetch`, or `git log --oneline -5`
 - Displays command output directly inside the TUI
@@ -38,10 +39,26 @@ gwtui
 - `down` / `j`: move selection down
 - `b`: create a branch for the selected detached or branchless worktree
 - `enter`: open command mode or run the command
-- `r`: refresh worktrees
+- `r`: refresh worktrees and branch status, optionally fetching first if `git.fetch_on_refresh` is enabled
+- `R`: always run `git fetch --prune`, then refresh worktrees and branch status
 - `esc`: leave command mode or output view
 - `?`: show help
 - `q` / `ctrl+c`: quit
+
+## Status Badges
+
+Worktree rows can include compact badges such as:
+
+- `clean`
+- `dirty`
+- `local`
+- `↑N`
+- `↓N`
+- `merged`
+- `not merged`
+- `error`
+
+Merge status is checked against the configured `git.base_branch`, which defaults to `origin/main`.
 
 ## Configuration
 
@@ -60,16 +77,31 @@ default_command: "git status"
 
 keybindings:
   refresh: "r"
+  fetch_refresh: "R"
   quit: "q"
   help: "?"
 
-ui:
+git:
+  base_branch: "origin/main"
+  fetch_on_refresh: false
+  show_remote_status: true
+  show_merge_status: true
   show_dirty_status: true
+
+ui:
   show_commit_hash: true
   show_branch: true
 ```
 
-See [config.example.yaml](/Users/sean/.codex/worktrees/690c/citadel/config.example.yaml) for a ready-to-copy example.
+Config notes:
+
+- `git.base_branch`: branch or ref used for merge checks, such as `origin/main`
+- `git.fetch_on_refresh`: if `true`, `r` runs `git fetch --prune` before status refresh
+- `git.show_remote_status`: show `local` and `↑N` / `↓N` badges
+- `git.show_merge_status`: show `merged` / `not merged` badges
+- `git.show_dirty_status`: show `clean` / `dirty` badges
+
+See [config.example.yaml](config.example.yaml) for a ready-to-copy example.
 
 ## Development
 

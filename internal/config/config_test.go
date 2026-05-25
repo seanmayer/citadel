@@ -18,6 +18,22 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	if cfg != Defaults() {
 		t.Fatalf("Load() = %#v, want %#v", cfg, Defaults())
 	}
+
+	if cfg.Git.BaseBranch != "origin/main" {
+		t.Fatalf("Git.BaseBranch = %q, want %q", cfg.Git.BaseBranch, "origin/main")
+	}
+	if cfg.Git.FetchOnRefresh {
+		t.Fatalf("Git.FetchOnRefresh = true, want false")
+	}
+	if !cfg.Git.ShowRemoteStatus {
+		t.Fatalf("Git.ShowRemoteStatus = false, want true")
+	}
+	if !cfg.Git.ShowMergeStatus {
+		t.Fatalf("Git.ShowMergeStatus = false, want true")
+	}
+	if !cfg.Git.ShowDirtyStatus {
+		t.Fatalf("Git.ShowDirtyStatus = false, want true")
+	}
 }
 
 func TestLoadMergesDefaults(t *testing.T) {
@@ -43,5 +59,20 @@ func TestLoadMergesDefaults(t *testing.T) {
 	}
 	if cfg.Keybindings.Refresh != Defaults().Keybindings.Refresh {
 		t.Fatalf("Refresh key = %q, want %q", cfg.Keybindings.Refresh, Defaults().Keybindings.Refresh)
+	}
+	if cfg.Git.BaseBranch != Defaults().Git.BaseBranch {
+		t.Fatalf("Git.BaseBranch = %q, want %q", cfg.Git.BaseBranch, Defaults().Git.BaseBranch)
+	}
+	if cfg.Git.FetchOnRefresh != Defaults().Git.FetchOnRefresh {
+		t.Fatalf("Git.FetchOnRefresh = %t, want %t", cfg.Git.FetchOnRefresh, Defaults().Git.FetchOnRefresh)
+	}
+	if cfg.Git.ShowRemoteStatus != Defaults().Git.ShowRemoteStatus {
+		t.Fatalf("Git.ShowRemoteStatus = %t, want %t", cfg.Git.ShowRemoteStatus, Defaults().Git.ShowRemoteStatus)
+	}
+	if cfg.Git.ShowMergeStatus != Defaults().Git.ShowMergeStatus {
+		t.Fatalf("Git.ShowMergeStatus = %t, want %t", cfg.Git.ShowMergeStatus, Defaults().Git.ShowMergeStatus)
+	}
+	if cfg.Git.ShowDirtyStatus != Defaults().Git.ShowDirtyStatus {
+		t.Fatalf("Git.ShowDirtyStatus = %t, want %t", cfg.Git.ShowDirtyStatus, Defaults().Git.ShowDirtyStatus)
 	}
 }

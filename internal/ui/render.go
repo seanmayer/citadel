@@ -79,22 +79,21 @@ func (r Renderer) renderListPane(vm ViewModel) string {
 		end := min(len(vm.Worktrees), vm.Top+height)
 		for i := vm.Top; i < end; i++ {
 			worktree := vm.Worktrees[i]
-			row := compactPath(worktree.Path)
-
-			meta := make([]string, 0, 3)
+			parts := make([]string, 0, 4)
 			if vm.Config.UI.ShowBranch {
-				meta = append(meta, worktree.BranchDisplay())
+				parts = append(parts, worktree.BranchDisplay())
 			}
-			if vm.Config.UI.ShowCommitHash && worktree.Head != "" {
-				meta = append(meta, git.ShortHash(worktree.Head))
-			}
-			if vm.Config.UI.ShowDirtyStatus && worktree.DirtyKnown && worktree.IsDirty {
-				meta = append(meta, "dirty")
+			parts = append(parts, displayPath(vm.RepoRoot, worktree.Path))
+			if vm.Config.UI.ShowCommitHash && worktree.CommitHash != "" {
+				parts = append(parts, git.ShortHash(worktree.CommitHash))
 			}
 
-			if len(meta) > 0 {
-				row = fmt.Sprintf("%s  %s", row, r.styles.Subtle.Render("["+strings.Join(meta, " | ")+"]"))
+			badges := r.statusBadges(worktree, vm.Config)
+			if len(badges) > 0 {
+				parts = append(parts, strings.Join(badges, " "))
 			}
+
+			row := strings.Join(parts, "  ")
 			if worktree.IsCurrent {
 				row += " " + r.styles.CurrentBadge.Render("current")
 			}
@@ -118,18 +117,44 @@ func (r Renderer) renderDetailPane(vm ViewModel) string {
 
 	if len(vm.Worktrees) > 0 && vm.Selected >= 0 && vm.Selected < len(vm.Worktrees) {
 		worktree := vm.Worktrees[vm.Selected]
-		lines := []string{
-			r.detailLine("path", worktree.Path),
-			r.detailLine("branch", worktree.BranchDisplay()),
-			r.detailLine("commit", fallbackValue(worktree.Head, "unknown")),
-			r.detailLine("current", yesNo(worktree.IsCurrent)),
+		upstream := "local-only"
+		if worktree.Status.HasUpstream {
+			upstream = worktree.Status.Upstream
 		}
-		if vm.Config.UI.ShowDirtyStatus {
-			dirty := "unknown"
-			if worktree.DirtyKnown {
-				dirty = yesNo(worktree.IsDirty)
+
+		ahead := "n/a"
+		behind := "n/a"
+		if worktree.Status.HasUpstream {
+			if worktree.Status.RemoteExists && worktree.Status.AheadBehindKnown() {
+				ahead = fmt.Sprintf("%d", worktree.Status.Ahead)
+				behind = fmt.Sprintf("%d", worktree.Status.Behind)
+			} else {
+				ahead = "unknown"
+				behind = "unknown"
 			}
-			lines = append(lines, r.detailLine("dirty", dirty))
+		}
+
+		merged := "unknown"
+		if worktree.Status.MergeKnown() {
+			merged = yesNo(worktree.Status.MergedIntoBase)
+		}
+
+		dirty := "unknown"
+		if worktree.Status.DirtyKnown() {
+			dirty = yesNo(worktree.Status.IsDirty)
+		}
+
+		lines := []string{
+			r.detailLine("Path", worktree.Path),
+			r.detailLine("Branch", worktree.BranchDisplay()),
+			r.detailLine("Commit", fallbackValue(worktree.CommitHash, "unknown")),
+			r.detailLine("Current worktree", yesNo(worktree.IsCurrent)),
+			r.detailLine("Upstream", upstream),
+			r.detailLine("Ahead", ahead),
+			r.detailLine("Behind", behind),
+			r.detailLine("Merged into base", merged),
+			r.detailLine("Dirty", dirty),
+			r.detailLine("Status error", fallbackValue(worktree.Status.Error, "none")),
 		}
 		if worktree.CanCreateBranch() && vm.Mode == ModeList {
 			lines = append(lines, "", r.styles.Subtle.Render("Press b to create a branch for this worktree."))
@@ -174,6 +199,7 @@ func (r Renderer) renderHelp(vm ViewModel) string {
 		r.helpLine(r.keys.Create),
 		r.helpLine(r.keys.Enter),
 		r.helpLine(r.keys.Refresh),
+		r.helpLine(r.keys.FetchRefresh),
 		r.helpLine(r.keys.Back),
 		r.helpLine(r.keys.Help),
 		r.helpLine(r.keys.Quit),
@@ -260,6 +286,52 @@ func compactPath(path string) string {
 	}
 
 	return filepath.Join("...", filepath.Join(parts[len(parts)-4:]...))
+}
+
+func displayPath(repoRoot string, worktreePath string) string {
+	if repoRoot != "" {
+		if relative, err := filepath.Rel(repoRoot, worktreePath); err == nil && relative != "" {
+			return relative
+		}
+	}
+
+	return compactPath(worktreePath)
+}
+
+func (r Renderer) statusBadges(worktree git.Worktree, cfg config.Config) []string {
+	badges := make([]string, 0, 5)
+
+	if cfg.Git.ShowRemoteStatus {
+		switch {
+		case !worktree.Status.HasUpstream:
+			badges = append(badges, "local")
+		case worktree.Status.RemoteExists && worktree.Status.AheadBehindKnown():
+			badges = append(badges, fmt.Sprintf("↑%d", worktree.Status.Ahead))
+			badges = append(badges, fmt.Sprintf("↓%d", worktree.Status.Behind))
+		}
+	}
+
+	if cfg.Git.ShowDirtyStatus && worktree.Status.DirtyKnown() {
+		if worktree.Status.IsDirty {
+			badges = append(badges, "dirty")
+		} else {
+			badges = append(badges, "clean")
+		}
+	}
+
+	if cfg.Git.ShowMergeStatus && worktree.Status.MergeKnown() {
+		if worktree.Status.MergedIntoBase {
+			badges = append(badges, "merged")
+		} else {
+			badges = append(badges, "not merged")
+		}
+	}
+
+	if worktree.Status.Error != "" {
+		badges = append(badges, "error")
+	}
+
+	return badges
 }
 
 func min(a int, b int) int {

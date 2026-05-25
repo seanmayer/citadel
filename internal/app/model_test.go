@@ -16,7 +16,7 @@ type stubGitService struct {
 	worktrees []git.Worktree
 }
 
-func (s *stubGitService) ListWorktrees(_ context.Context, _ string, _ string, _ bool) ([]git.Worktree, error) {
+func (s *stubGitService) ListWorktrees(_ context.Context, _ string, _ string, _ git.RefreshOptions) ([]git.Worktree, error) {
 	return s.worktrees, nil
 }
 
