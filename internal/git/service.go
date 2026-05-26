@@ -23,6 +23,25 @@ type Worktree struct {
 	Status     BranchStatus
 }
 
+func (w Worktree) HasNamedBranch() bool {
+	return w.Branch != "" && !w.IsDetached
+}
+
+func (w Worktree) CanCreateBranch() bool {
+	return !w.IsBare && !w.HasNamedBranch()
+}
+
+func (w Worktree) BranchDisplay() string {
+	switch {
+	case w.HasNamedBranch():
+		return w.Branch
+	case w.IsDetached:
+		return "detached"
+	default:
+		return "none"
+	}
+}
+
 type RefreshOptions struct {
 	BaseBranch string
 	Fetch      bool
