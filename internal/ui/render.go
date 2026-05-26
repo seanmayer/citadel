@@ -19,6 +19,7 @@ const (
 	ModeList    Mode = "list"
 	ModeCommand Mode = "command"
 	ModeCreate  Mode = "create-branch"
+	ModeDelete  Mode = "delete-worktree"
 	ModeOutput  Mode = "output"
 	ModeHelp    Mode = "help"
 )
@@ -159,6 +160,14 @@ func (r Renderer) renderDetailPane(vm ViewModel) string {
 		if worktree.CanCreateBranch() && vm.Mode == ModeList {
 			lines = append(lines, "", r.styles.Subtle.Render("Press b to create a branch for this worktree."))
 		}
+		if vm.Mode == ModeList {
+			switch {
+			case worktree.IsCurrent:
+				lines = append(lines, "", r.styles.Subtle.Render("Current worktree cannot be deleted while gwtui is running in it."))
+			case !worktree.IsBare:
+				lines = append(lines, "", r.styles.Subtle.Render("Press d to delete this worktree."))
+			}
+		}
 		content = strings.Join(lines, "\n")
 	}
 
@@ -177,6 +186,10 @@ func (r Renderer) renderDetailPane(vm ViewModel) string {
 				vm.BranchInput,
 		)
 		content = content + "\n\n" + branchPanel
+	}
+	if vm.Mode == ModeDelete && len(vm.Worktrees) > 0 && vm.Selected >= 0 && vm.Selected < len(vm.Worktrees) {
+		deletePanel := r.styles.CommandBox.Render(r.renderDeleteConfirmation(vm, vm.Worktrees[vm.Selected]))
+		content = content + "\n\n" + deletePanel
 	}
 
 	return r.styles.Panel.Width(panelWidths(vm.Width)[1]).Render(title + "\n\n" + content)
@@ -197,12 +210,16 @@ func (r Renderer) renderHelp(vm ViewModel) string {
 		r.helpLine(r.keys.Up),
 		r.helpLine(r.keys.Down),
 		r.helpLine(r.keys.Create),
+		r.helpLine(r.keys.Delete),
 		r.helpLine(r.keys.Enter),
 		r.helpLine(r.keys.Refresh),
 		r.helpLine(r.keys.FetchRefresh),
 		r.helpLine(r.keys.Back),
 		r.helpLine(r.keys.Help),
 		r.helpLine(r.keys.Quit),
+	}
+	if vm.Mode == ModeDelete {
+		lines = append(lines, fmt.Sprintf("%-12s %s", "y", "confirm delete"))
 	}
 	if vm.StatusMessage != "" {
 		lines = append(lines, "", r.styles.Subtle.Render(vm.StatusMessage))
@@ -211,7 +228,11 @@ func (r Renderer) renderHelp(vm ViewModel) string {
 }
 
 func (r Renderer) renderFooter(vm ViewModel) string {
-	lines := []string{r.styles.Footer.Render(r.keys.ShortHelp())}
+	help := r.keys.ShortHelp()
+	if vm.Mode == ModeDelete {
+		help = help + "  y confirm delete"
+	}
+	lines := []string{r.styles.Footer.Render(help)}
 	if vm.StatusMessage != "" {
 		lines = append(lines, r.styles.Subtle.Render(vm.StatusMessage))
 	}
@@ -296,6 +317,56 @@ func displayPath(repoRoot string, worktreePath string) string {
 	}
 
 	return compactPath(worktreePath)
+}
+
+func (r Renderer) renderDeleteConfirmation(vm ViewModel, worktree git.Worktree) string {
+	lines := []string{
+		r.styles.Label.Render("Delete Worktree"),
+		r.styles.Subtle.Render("Remove the selected worktree and delete its local branch if it has one."),
+		"",
+		r.detailLine("Path", worktree.Path),
+		r.detailLine("Branch", worktree.BranchDisplay()),
+	}
+
+	warnings := deleteWarnings(worktree, vm.Config.Git.BaseBranch)
+	if len(warnings) > 0 {
+		lines = append(lines, "")
+		for _, warning := range warnings {
+			lines = append(lines, r.styles.Error.Render("Warning: "+warning))
+		}
+	} else {
+		lines = append(lines, "", r.styles.Subtle.Render("This worktree is ready to delete."))
+	}
+
+	lines = append(lines, "", r.styles.Subtle.Render("Press y to delete or esc to cancel."))
+	return strings.Join(lines, "\n")
+}
+
+func deleteWarnings(worktree git.Worktree, baseBranch string) []string {
+	warnings := make([]string, 0, 3)
+	if baseBranch == "" {
+		baseBranch = "origin/main"
+	}
+
+	switch {
+	case worktree.HasNamedBranch() && worktree.Status.MergeKnown() && !worktree.Status.MergedIntoBase:
+		warnings = append(warnings, fmt.Sprintf("This worktree branch is not merged into %s.", baseBranch))
+	case !worktree.HasNamedBranch() && worktree.Status.MergeKnown() && !worktree.Status.MergedIntoBase:
+		warnings = append(warnings, fmt.Sprintf("This worktree is not merged into %s.", baseBranch))
+	case worktree.HasNamedBranch() && !worktree.Status.MergeKnown():
+		warnings = append(warnings, fmt.Sprintf("Merge status for this worktree branch is unknown against %s.", baseBranch))
+	case !worktree.HasNamedBranch() && !worktree.Status.MergeKnown():
+		warnings = append(warnings, fmt.Sprintf("Merge status for this worktree is unknown against %s.", baseBranch))
+	}
+
+	if worktree.Status.DirtyKnown() && worktree.Status.IsDirty {
+		warnings = append(warnings, "Uncommitted changes in this worktree will be lost.")
+	}
+	if worktree.Locked {
+		warnings = append(warnings, "This worktree is locked and will be force removed.")
+	}
+
+	return warnings
 }
 
 func (r Renderer) statusBadges(worktree git.Worktree, cfg config.Config) []string {

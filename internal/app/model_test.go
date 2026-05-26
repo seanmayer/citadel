@@ -13,11 +13,34 @@ import (
 )
 
 type stubGitService struct {
-	worktrees []git.Worktree
+	worktrees    []git.Worktree
+	deleteCalls  []deleteCall
+	deleteOutput string
+	deleteErr    error
 }
 
 func (s *stubGitService) ListWorktrees(_ context.Context, _ string, _ string, _ git.RefreshOptions) ([]git.Worktree, error) {
 	return s.worktrees, nil
+}
+
+type deleteCall struct {
+	repoRoot string
+	worktree git.Worktree
+	options  git.DeleteOptions
+}
+
+func (s *stubGitService) DeleteWorktree(_ context.Context, repoRoot string, worktree git.Worktree, options git.DeleteOptions) (string, error) {
+	s.deleteCalls = append(s.deleteCalls, deleteCall{
+		repoRoot: repoRoot,
+		worktree: worktree,
+		options:  options,
+	})
+
+	if s.deleteOutput == "" {
+		return "deleted", s.deleteErr
+	}
+
+	return s.deleteOutput, s.deleteErr
 }
 
 type commandCall struct {
@@ -160,5 +183,160 @@ func TestCreateBranchModeRunsGitSwitchCreateAndRefreshes(t *testing.T) {
 	}
 	if len(worktreesMsg.worktrees) != 1 || worktreesMsg.worktrees[0].Branch != "feature/demo" {
 		t.Fatalf("reloaded worktrees = %#v, want branch feature/demo", worktreesMsg.worktrees)
+	}
+}
+
+func TestDeleteKeyEntersDeleteModeForSelectableWorktree(t *testing.T) {
+	t.Parallel()
+
+	gitService := &stubGitService{}
+	commandService := &stubCommandService{}
+	model := New(config.Defaults(), gitService, commandService, "/repo")
+	model.worktrees = []git.Worktree{{
+		Path:       "/repo/detached",
+		Branch:     "detached",
+		IsDetached: true,
+	}}
+
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	updated := next.(*Model)
+
+	if updated.state != ui.ModeDelete {
+		t.Fatalf("state = %q, want %q", updated.state, ui.ModeDelete)
+	}
+	if updated.statusMessage != "Delete mode. Press y to confirm or esc to cancel." {
+		t.Fatalf("statusMessage = %q, want delete confirmation message", updated.statusMessage)
+	}
+}
+
+func TestDeleteKeyRejectsCurrentWorktree(t *testing.T) {
+	t.Parallel()
+
+	gitService := &stubGitService{}
+	commandService := &stubCommandService{}
+	model := New(config.Defaults(), gitService, commandService, "/repo")
+	model.worktrees = []git.Worktree{{
+		Path:      "/repo",
+		Branch:    "main",
+		IsCurrent: true,
+	}}
+
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	updated := next.(*Model)
+
+	if updated.state != ui.ModeList {
+		t.Fatalf("state = %q, want %q", updated.state, ui.ModeList)
+	}
+	if updated.errorMessage != "Cannot delete the current worktree." {
+		t.Fatalf("errorMessage = %q, want current-worktree error", updated.errorMessage)
+	}
+}
+
+func TestDeleteModeRunsWorktreeDeletionAndRefreshes(t *testing.T) {
+	t.Parallel()
+
+	gitService := &stubGitService{
+		worktrees: []git.Worktree{{
+			Path:       "/repo/detached",
+			Branch:     "detached",
+			IsDetached: true,
+		}},
+	}
+	commandService := &stubCommandService{}
+	model := New(config.Defaults(), gitService, commandService, "/repo")
+	model.worktrees = gitService.worktrees
+	model.state = ui.ModeDelete
+	model.deleteTarget = gitService.worktrees[0]
+
+	next, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	updated := next.(*Model)
+	if cmd == nil {
+		t.Fatal("delete command = nil, want command")
+	}
+
+	msg := cmd()
+	finished, ok := msg.(commandFinishedMsg)
+	if !ok {
+		t.Fatalf("message type = %T, want commandFinishedMsg", msg)
+	}
+
+	if len(gitService.deleteCalls) != 1 {
+		t.Fatalf("DeleteWorktree() call count = %d, want 1", len(gitService.deleteCalls))
+	}
+
+	call := gitService.deleteCalls[0]
+	if call.repoRoot != "/repo" {
+		t.Fatalf("repoRoot = %q, want %q", call.repoRoot, "/repo")
+	}
+	if call.worktree.Path != "/repo/detached" {
+		t.Fatalf("worktree.Path = %q, want %q", call.worktree.Path, "/repo/detached")
+	}
+	if call.options.ForceRemove {
+		t.Fatalf("ForceRemove = true, want false")
+	}
+	if call.options.ForceBranch {
+		t.Fatalf("ForceBranch = true, want false")
+	}
+
+	gitService.worktrees = []git.Worktree{{
+		Path:   "/repo",
+		Branch: "main",
+	}}
+
+	next, refreshCmd := updated.Update(finished)
+	updated = next.(*Model)
+	if updated.state != ui.ModeOutput {
+		t.Fatalf("state = %q, want %q", updated.state, ui.ModeOutput)
+	}
+	if updated.statusMessage != "Worktree deleted." {
+		t.Fatalf("statusMessage = %q, want %q", updated.statusMessage, "Worktree deleted.")
+	}
+	if refreshCmd == nil {
+		t.Fatal("refresh command = nil, want reload command")
+	}
+
+	reloadMsg := refreshCmd()
+	worktreesMsg, ok := reloadMsg.(worktreesLoadedMsg)
+	if !ok {
+		t.Fatalf("reload message type = %T, want worktreesLoadedMsg", reloadMsg)
+	}
+	if len(worktreesMsg.worktrees) != 1 || worktreesMsg.worktrees[0].Branch != "main" {
+		t.Fatalf("reloaded worktrees = %#v, want remaining main worktree", worktreesMsg.worktrees)
+	}
+}
+
+func TestDeleteModeForcesBranchDeletionWhenMergeStatusIsUnknown(t *testing.T) {
+	t.Parallel()
+
+	gitService := &stubGitService{
+		worktrees: []git.Worktree{{
+			Path:   "/repo/feature",
+			Branch: "feature/demo",
+			Status: git.BranchStatus{
+				MergedIntoBase: false,
+			},
+		}},
+	}
+	commandService := &stubCommandService{}
+	model := New(config.Defaults(), gitService, commandService, "/repo")
+	model.worktrees = gitService.worktrees
+
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	updated := next.(*Model)
+	if updated.state != ui.ModeDelete {
+		t.Fatalf("state = %q, want %q", updated.state, ui.ModeDelete)
+	}
+
+	_, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if cmd == nil {
+		t.Fatal("delete command = nil, want command")
+	}
+	cmd()
+
+	if len(gitService.deleteCalls) != 1 {
+		t.Fatalf("DeleteWorktree() call count = %d, want 1", len(gitService.deleteCalls))
+	}
+	if !gitService.deleteCalls[0].options.ForceBranch {
+		t.Fatalf("ForceBranch = false, want true")
 	}
 }

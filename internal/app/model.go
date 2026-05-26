@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -18,6 +19,7 @@ import (
 
 type GitService interface {
 	ListWorktrees(ctx context.Context, repoRoot string, currentWorktreePath string, options git.RefreshOptions) ([]git.Worktree, error)
+	DeleteWorktree(ctx context.Context, repoRoot string, worktree git.Worktree, options git.DeleteOptions) (string, error)
 }
 
 type CommandService interface {
@@ -30,9 +32,10 @@ type worktreesLoadedMsg struct {
 }
 
 type commandFinishedMsg struct {
-	result           commands.Result
-	err              error
-	refreshOnSuccess bool
+	result         commands.Result
+	err            error
+	refresh        bool
+	successMessage string
 }
 
 type Model struct {
@@ -53,6 +56,8 @@ type Model struct {
 	commandInput        *commands.InputModel
 	branchInput         *commands.InputModel
 	outputViewport      viewport.Model
+	deleteTarget        git.Worktree
+	deleteOptions       git.DeleteOptions
 	lastCommand         string
 	statusMessage       string
 	errorMessage        string
@@ -116,18 +121,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.lastCommand = msg.result.Parsed.Raw
+		m.clearDeleteState()
 		m.errorMessage = ""
 		if msg.err != nil {
 			m.errorMessage = msg.err.Error()
 		}
 		m.statusMessage = "Command finished."
-		if msg.err == nil && msg.refreshOnSuccess {
-			m.statusMessage = "Branch created."
+		if msg.err == nil && msg.successMessage != "" {
+			m.statusMessage = msg.successMessage
 		}
 		m.state = ui.ModeOutput
 		m.outputViewport.SetContent(msg.result.Output)
 		m.outputViewport.GotoTop()
-		if msg.err == nil && msg.refreshOnSuccess {
+		if msg.refresh {
 			return m, m.loadWorktreesCmd(false)
 		}
 		return m, nil
@@ -138,6 +144,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateCommand(msg)
 	case ui.ModeCreate:
 		return m.updateCreateBranch(msg)
+	case ui.ModeDelete:
+		return m.updateDelete(msg)
 	case ui.ModeOutput:
 		return m.updateOutput(msg)
 	case ui.ModeHelp:
@@ -221,6 +229,27 @@ func (m *Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMessage = "Create branch mode."
 		m.errorMessage = ""
 		return m, m.branchInput.Focus()
+	case key.Matches(keyMsg, m.keys.Delete):
+		worktree, ok := m.selectedWorktree()
+		if !ok {
+			return m, nil
+		}
+		if worktree.IsCurrent {
+			m.statusMessage = "Worktree was not deleted."
+			m.errorMessage = "Cannot delete the current worktree."
+			return m, nil
+		}
+		if worktree.IsBare {
+			m.statusMessage = "Worktree was not deleted."
+			m.errorMessage = "Cannot delete a bare worktree."
+			return m, nil
+		}
+		m.deleteTarget = worktree
+		m.deleteOptions = m.deleteOptionsFor(worktree)
+		m.state = ui.ModeDelete
+		m.statusMessage = "Delete mode. Press y to confirm or esc to cancel."
+		m.errorMessage = ""
+		return m, nil
 	case key.Matches(keyMsg, m.keys.Enter):
 		if len(m.worktrees) == 0 {
 			return m, nil
@@ -259,7 +288,7 @@ func (m *Model) updateCommand(msg tea.Msg) (tea.Model, tea.Cmd) {
 			raw := m.commandInput.ResolvedValue()
 			m.statusMessage = "Running command..."
 			m.errorMessage = ""
-			return m, m.executeCommandCmd(worktree.Path, raw, false)
+			return m, m.executeCommandCmd(worktree.Path, raw, false, "")
 		}
 	}
 
@@ -298,12 +327,45 @@ func (m *Model) updateCreateBranch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			raw := fmt.Sprintf("git switch -c %q", branchName)
 			m.statusMessage = "Creating branch..."
 			m.errorMessage = ""
-			return m, m.executeCommandCmd(worktree.Path, raw, true)
+			return m, m.executeCommandCmd(worktree.Path, raw, true, "Branch created.")
 		}
 	}
 
 	cmd := m.branchInput.Update(msg)
 	return m, cmd
+}
+
+func (m *Model) updateDelete(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch {
+		case keyMsg.Type == tea.KeyCtrlC:
+			return m, tea.Quit
+		case key.Matches(keyMsg, m.keys.Back):
+			m.clearDeleteState()
+			m.state = ui.ModeList
+			m.errorMessage = ""
+			m.statusMessage = "Returned to worktree list."
+			return m, nil
+		case key.Matches(keyMsg, m.keys.Help):
+			m.previousState = m.state
+			m.state = ui.ModeHelp
+			return m, nil
+		case isConfirmDeleteKey(keyMsg):
+			worktree := m.deleteTarget
+			if worktree.Path == "" {
+				selected, ok := m.selectedWorktree()
+				if !ok {
+					return m, nil
+				}
+				worktree = selected
+			}
+			m.statusMessage = "Deleting worktree..."
+			m.errorMessage = ""
+			return m, m.executeDeleteCmd(worktree, m.deleteOptions)
+		}
+	}
+
+	return m, nil
 }
 
 func (m *Model) updateOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -361,16 +423,35 @@ func (m *Model) loadWorktreesCmd(forceFetch bool) tea.Cmd {
 	}
 }
 
-func (m *Model) executeCommandCmd(worktreePath string, raw string, refreshOnSuccess bool) tea.Cmd {
+func (m *Model) executeCommandCmd(worktreePath string, raw string, refresh bool, successMessage string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 
 		result, err := m.commandService.Execute(ctx, worktreePath, raw)
 		return commandFinishedMsg{
-			result:           result,
-			err:              err,
-			refreshOnSuccess: refreshOnSuccess,
+			result:         result,
+			err:            err,
+			refresh:        refresh,
+			successMessage: successMessage,
+		}
+	}
+}
+
+func (m *Model) executeDeleteCmd(worktree git.Worktree, options git.DeleteOptions) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+
+		output, err := m.gitService.DeleteWorktree(ctx, m.repoRoot, worktree, options)
+		return commandFinishedMsg{
+			result: commands.Result{
+				Parsed: commands.ParsedCommand{Raw: deleteCommandLabel(worktree, options)},
+				Output: output,
+			},
+			err:            err,
+			refresh:        true,
+			successMessage: "Worktree deleted.",
 		}
 	}
 }
@@ -430,4 +511,41 @@ func (m *Model) selectedWorktree() (git.Worktree, bool) {
 		return git.Worktree{}, false
 	}
 	return m.worktrees[m.selected], true
+}
+
+func (m *Model) clearDeleteState() {
+	m.deleteTarget = git.Worktree{}
+	m.deleteOptions = git.DeleteOptions{}
+}
+
+func (m *Model) deleteOptionsFor(worktree git.Worktree) git.DeleteOptions {
+	return git.DeleteOptions{
+		ForceRemove: worktree.Locked || (worktree.Status.DirtyKnown() && worktree.Status.IsDirty),
+		ForceBranch: worktree.HasNamedBranch() && (!worktree.Status.MergeKnown() || !worktree.Status.MergedIntoBase),
+	}
+}
+
+func deleteCommandLabel(worktree git.Worktree, options git.DeleteOptions) string {
+	parts := make([]string, 0, 2)
+
+	removeArgs := []string{"worktree", "remove"}
+	if options.ForceRemove {
+		removeArgs = append(removeArgs, "--force")
+	}
+	removeArgs = append(removeArgs, worktree.Path)
+	parts = append(parts, "git "+strings.Join(removeArgs, " "))
+
+	if worktree.HasNamedBranch() {
+		deleteFlag := "-d"
+		if options.ForceBranch {
+			deleteFlag = "-D"
+		}
+		parts = append(parts, fmt.Sprintf("git branch %s %s", deleteFlag, worktree.Branch))
+	}
+
+	return strings.Join(parts, " && ")
+}
+
+func isConfirmDeleteKey(msg tea.KeyMsg) bool {
+	return msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && (msg.Runes[0] == 'y' || msg.Runes[0] == 'Y')
 }

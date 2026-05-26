@@ -47,6 +47,11 @@ type RefreshOptions struct {
 	Fetch      bool
 }
 
+type DeleteOptions struct {
+	ForceRemove bool
+	ForceBranch bool
+}
+
 type CommandRunner interface {
 	Run(dir string, name string, args ...string) (stdout string, stderr string, exitCode int, err error)
 }
@@ -183,6 +188,38 @@ func (s *Service) FetchRemoteState(ctx context.Context, repoRoot string) error {
 		return fmt.Errorf("fetch remote state: %s", message)
 	}
 	return nil
+}
+
+func (s *Service) DeleteWorktree(ctx context.Context, repoRoot string, worktree Worktree, options DeleteOptions) (string, error) {
+	transcript := make([]string, 0, 2)
+
+	removeArgs := []string{"worktree", "remove"}
+	if options.ForceRemove {
+		removeArgs = append(removeArgs, "--force")
+	}
+	removeArgs = append(removeArgs, worktree.Path)
+
+	removeOutput, err := s.ExecuteGitCommand(ctx, repoRoot, removeArgs)
+	transcript = append(transcript, formatCommandTranscript(displayCommand(removeArgs), removeOutput))
+	if err != nil {
+		return strings.Join(transcript, "\n\n"), err
+	}
+
+	if worktree.HasNamedBranch() {
+		deleteFlag := "-d"
+		if options.ForceBranch {
+			deleteFlag = "-D"
+		}
+
+		branchArgs := []string{"branch", deleteFlag, worktree.Branch}
+		branchOutput, branchErr := s.ExecuteGitCommand(ctx, repoRoot, branchArgs)
+		transcript = append(transcript, formatCommandTranscript(displayCommand(branchArgs), branchOutput))
+		if branchErr != nil {
+			return strings.Join(transcript, "\n\n"), branchErr
+		}
+	}
+
+	return strings.Join(transcript, "\n\n"), nil
 }
 
 func (s *Service) ExecuteGitCommand(ctx context.Context, worktreePath string, args []string) (string, error) {
@@ -360,4 +397,13 @@ func displayCommand(args []string) string {
 	}
 
 	return "git " + strings.Join(args, " ")
+}
+
+func formatCommandTranscript(command string, output string) string {
+	output = strings.TrimSpace(output)
+	if output == "" {
+		output = "(no output)"
+	}
+
+	return command + "\n" + output
 }
