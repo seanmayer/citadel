@@ -14,6 +14,7 @@ type KeyMap struct {
 	Create       key.Binding
 	Delete       key.Binding
 	Enter        key.Binding
+	Continue     key.Binding
 	Refresh      key.Binding
 	FetchRefresh key.Binding
 	Back         key.Binding
@@ -43,6 +44,10 @@ func NewKeyMap(cfg config.Keybindings) KeyMap {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "open or run"),
 		),
+		Continue: key.NewBinding(
+			key.WithKeys(" ", "enter"),
+			key.WithHelp("space/enter", "continue"),
+		),
 		Refresh: key.NewBinding(
 			key.WithKeys(cfg.Refresh),
 			key.WithHelp(cfg.Refresh, "refresh"),
@@ -68,6 +73,15 @@ func NewKeyMap(cfg config.Keybindings) KeyMap {
 
 func (k KeyMap) ShortHelp() string {
 	items := []key.Binding{k.Up, k.Down, k.Create, k.Delete, k.Enter, k.Refresh, k.FetchRefresh, k.Back, k.Help, k.Quit}
+	return helpString(items)
+}
+
+func (k KeyMap) OutputHelp() string {
+	items := []key.Binding{k.Up, k.Down, k.Continue, k.Back, k.Help, k.Quit}
+	return helpString(items)
+}
+
+func helpString(items []key.Binding) string {
 	parts := make([]string, 0, len(items))
 	for _, binding := range items {
 		help := binding.Help()
