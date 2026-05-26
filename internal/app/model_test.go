@@ -340,3 +340,25 @@ func TestDeleteModeForcesBranchDeletionWhenMergeStatusIsUnknown(t *testing.T) {
 		t.Fatalf("ForceBranch = false, want true")
 	}
 }
+
+func TestOutputModeSpaceReturnsToList(t *testing.T) {
+	t.Parallel()
+
+	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, "/repo")
+	model.state = ui.ModeOutput
+	model.statusMessage = "Command finished."
+	model.errorMessage = "stale"
+
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	updated := next.(*Model)
+
+	if updated.state != ui.ModeList {
+		t.Fatalf("state = %q, want %q", updated.state, ui.ModeList)
+	}
+	if updated.statusMessage != "Returned to worktree list." {
+		t.Fatalf("statusMessage = %q, want return message", updated.statusMessage)
+	}
+	if updated.errorMessage != "" {
+		t.Fatalf("errorMessage = %q, want empty", updated.errorMessage)
+	}
+}

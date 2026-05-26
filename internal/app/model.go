@@ -373,7 +373,7 @@ func (m *Model) updateOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(keyMsg, m.keys.Quit):
 			return m, tea.Quit
-		case key.Matches(keyMsg, m.keys.Back):
+		case key.Matches(keyMsg, m.keys.Continue), key.Matches(keyMsg, m.keys.Back):
 			m.state = ui.ModeList
 			m.errorMessage = ""
 			m.statusMessage = "Returned to worktree list."
@@ -461,7 +461,7 @@ func (m *Model) resizeComponents() {
 	m.branchInput.SetWidth(m.commandInputWidth())
 
 	outputWidth := m.width - 8
-	outputHeight := m.height - 8
+	outputHeight := m.height - 13
 	if outputWidth < 20 {
 		outputWidth = 20
 	}

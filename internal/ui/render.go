@@ -199,8 +199,9 @@ func (r Renderer) renderOutput(vm ViewModel) string {
 	title := r.styles.Header.Render("Command Output")
 	meta := r.styles.Subtle.Render(vm.LastCommand)
 	body := r.styles.OutputBox.Render(vm.OutputView)
+	cta := r.renderOutputContinue(vm)
 	footer := r.renderFooter(vm)
-	return lipgloss.JoinVertical(lipgloss.Left, title, meta, body, footer)
+	return lipgloss.JoinVertical(lipgloss.Left, title, meta, body, cta, footer)
 }
 
 func (r Renderer) renderHelp(vm ViewModel) string {
@@ -212,6 +213,7 @@ func (r Renderer) renderHelp(vm ViewModel) string {
 		r.helpLine(r.keys.Create),
 		r.helpLine(r.keys.Delete),
 		r.helpLine(r.keys.Enter),
+		r.helpLine(r.keys.Continue),
 		r.helpLine(r.keys.Refresh),
 		r.helpLine(r.keys.FetchRefresh),
 		r.helpLine(r.keys.Back),
@@ -229,6 +231,9 @@ func (r Renderer) renderHelp(vm ViewModel) string {
 
 func (r Renderer) renderFooter(vm ViewModel) string {
 	help := r.keys.ShortHelp()
+	if vm.Mode == ModeOutput {
+		help = r.keys.OutputHelp()
+	}
 	if vm.Mode == ModeDelete {
 		help = help + "  y confirm delete"
 	}
@@ -240,6 +245,22 @@ func (r Renderer) renderFooter(vm ViewModel) string {
 		lines = append(lines, r.styles.Error.Render(vm.ErrorMessage))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (r Renderer) renderOutputContinue(vm ViewModel) string {
+	content := lipgloss.JoinVertical(
+		lipgloss.Center,
+		r.styles.ContinueTitle.Render("SPACE TO CONTINUE"),
+		r.styles.ContinueHint.Render("Return to the worktree list"),
+	)
+	box := r.styles.ContinueBox.Render(content)
+
+	availableWidth := vm.Width - 4
+	if availableWidth <= lipgloss.Width(box) {
+		return box
+	}
+
+	return lipgloss.PlaceHorizontal(availableWidth, lipgloss.Center, box)
 }
 
 func (r Renderer) detailLine(label string, value string) string {

@@ -41,6 +41,7 @@ gwtui
 - `b`: create a branch for the selected detached or branchless worktree
 - `d`: delete the selected worktree and confirm with `y`
 - `enter`: open command mode or run the command
+- `space` / `enter`: continue from the command output view back to the worktree list
 - `r`: refresh worktrees and branch status, optionally fetching first if `git.fetch_on_refresh` is enabled
 - `R`: always run `git fetch --prune`, then refresh worktrees and branch status
 - `esc`: leave command mode or output view
