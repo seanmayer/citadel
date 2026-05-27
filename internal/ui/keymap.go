@@ -11,6 +11,7 @@ import (
 type KeyMap struct {
 	Up           key.Binding
 	Down         key.Binding
+	OpenEditor   key.Binding
 	Create       key.Binding
 	Delete       key.Binding
 	Enter        key.Binding
@@ -32,6 +33,10 @@ func NewKeyMap(cfg config.Keybindings) KeyMap {
 			key.WithKeys("down", "j"),
 			key.WithHelp("down/j", "move down"),
 		),
+		OpenEditor: key.NewBinding(
+			key.WithKeys(cfg.OpenEditor),
+			key.WithHelp(cfg.OpenEditor, "open editor"),
+		),
 		Create: key.NewBinding(
 			key.WithKeys("b"),
 			key.WithHelp("b", "create branch"),
@@ -42,7 +47,7 @@ func NewKeyMap(cfg config.Keybindings) KeyMap {
 		),
 		Enter: key.NewBinding(
 			key.WithKeys("enter"),
-			key.WithHelp("enter", "open or run"),
+			key.WithHelp("enter", "command/run"),
 		),
 		Continue: key.NewBinding(
 			key.WithKeys(" ", "enter"),
@@ -72,7 +77,7 @@ func NewKeyMap(cfg config.Keybindings) KeyMap {
 }
 
 func (k KeyMap) ShortHelp() string {
-	items := []key.Binding{k.Up, k.Down, k.Create, k.Delete, k.Enter, k.Refresh, k.FetchRefresh, k.Back, k.Help, k.Quit}
+	items := []key.Binding{k.Up, k.Down, k.OpenEditor, k.Create, k.Delete, k.Enter, k.Refresh, k.FetchRefresh, k.Back, k.Help, k.Quit}
 	return helpString(items)
 }
 

@@ -26,9 +26,17 @@ type CommandService interface {
 	Execute(ctx context.Context, worktreePath string, raw string) (commands.Result, error)
 }
 
+type EditorService interface {
+	Open(ctx context.Context, worktreePath string) error
+}
+
 type worktreesLoadedMsg struct {
 	worktrees []git.Worktree
 	err       error
+}
+
+type editorOpenedMsg struct {
+	err error
 }
 
 type commandFinishedMsg struct {
@@ -42,6 +50,7 @@ type Model struct {
 	config              config.Config
 	gitService          GitService
 	commandService      CommandService
+	editorService       EditorService
 	repoRoot            string
 	currentWorktreePath string
 	worktrees           []git.Worktree
@@ -63,12 +72,13 @@ type Model struct {
 	errorMessage        string
 }
 
-func New(cfg config.Config, gitService GitService, commandService CommandService, currentWorktreePath string) *Model {
+func New(cfg config.Config, gitService GitService, commandService CommandService, editorService EditorService, currentWorktreePath string) *Model {
 	keys := ui.NewKeyMap(cfg.Keybindings)
 	return &Model{
 		config:              cfg,
 		gitService:          gitService,
 		commandService:      commandService,
+		editorService:       editorService,
 		repoRoot:            currentWorktreePath,
 		currentWorktreePath: currentWorktreePath,
 		state:               ui.ModeList,
@@ -110,6 +120,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.state != ui.ModeOutput {
 			m.statusMessage = fmt.Sprintf("Loaded %d worktree(s)", len(m.worktrees))
 		}
+		m.errorMessage = ""
+		return m, nil
+	case editorOpenedMsg:
+		if msg.err != nil {
+			m.statusMessage = "Editor was not opened."
+			m.errorMessage = msg.err.Error()
+			return m, nil
+		}
+		m.statusMessage = "Opened worktree in editor."
 		m.errorMessage = ""
 		return m, nil
 	case commandFinishedMsg:
@@ -208,6 +227,19 @@ func (m *Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ensureSelectionVisible()
 		}
 		return m, nil
+	case key.Matches(keyMsg, m.keys.OpenEditor):
+		worktree, ok := m.selectedWorktree()
+		if !ok {
+			return m, nil
+		}
+		if worktree.IsBare {
+			m.statusMessage = "Editor was not opened."
+			m.errorMessage = "Cannot open a bare worktree in an editor."
+			return m, nil
+		}
+		m.statusMessage = "Opening worktree in editor..."
+		m.errorMessage = ""
+		return m, m.openEditorCmd(worktree.Path)
 	case key.Matches(keyMsg, m.keys.Create):
 		worktree, ok := m.selectedWorktree()
 		if !ok {
@@ -453,6 +485,20 @@ func (m *Model) executeDeleteCmd(worktree git.Worktree, options git.DeleteOption
 			refresh:        true,
 			successMessage: "Worktree deleted.",
 		}
+	}
+}
+
+func (m *Model) openEditorCmd(worktreePath string) tea.Cmd {
+	return func() tea.Msg {
+		if m.editorService == nil {
+			return editorOpenedMsg{err: errors.New("editor service is not configured")}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		err := m.editorService.Open(ctx, worktreePath)
+		return editorOpenedMsg{err: err}
 	}
 }
 

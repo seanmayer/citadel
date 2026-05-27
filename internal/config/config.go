@@ -10,17 +10,24 @@ import (
 )
 
 type Config struct {
-	DefaultCommand string      `yaml:"default_command"`
-	Keybindings    Keybindings `yaml:"keybindings"`
-	Git            GitConfig   `yaml:"git"`
-	UI             UIConfig    `yaml:"ui"`
+	DefaultCommand string       `yaml:"default_command"`
+	Keybindings    Keybindings  `yaml:"keybindings"`
+	Editor         EditorConfig `yaml:"editor"`
+	Git            GitConfig    `yaml:"git"`
+	UI             UIConfig     `yaml:"ui"`
 }
 
 type Keybindings struct {
+	OpenEditor   string `yaml:"open_editor"`
 	Refresh      string `yaml:"refresh"`
 	FetchRefresh string `yaml:"fetch_refresh"`
 	Quit         string `yaml:"quit"`
 	Help         string `yaml:"help"`
+}
+
+type EditorConfig struct {
+	Command string   `yaml:"command"`
+	Args    []string `yaml:"args"`
 }
 
 type GitConfig struct {
@@ -41,10 +48,15 @@ func Defaults() Config {
 	return Config{
 		DefaultCommand: "git status",
 		Keybindings: Keybindings{
+			OpenEditor:   "o",
 			Refresh:      "r",
 			FetchRefresh: "R",
 			Quit:         "q",
 			Help:         "?",
+		},
+		Editor: EditorConfig{
+			Command: "code",
+			Args:    []string{"."},
 		},
 		Git: GitConfig{
 			BaseBranch:       "origin/main",
@@ -100,6 +112,9 @@ func Load(path string) (Config, error) {
 	if cfg.Keybindings.Refresh == "" {
 		cfg.Keybindings.Refresh = Defaults().Keybindings.Refresh
 	}
+	if cfg.Keybindings.OpenEditor == "" {
+		cfg.Keybindings.OpenEditor = Defaults().Keybindings.OpenEditor
+	}
 	if cfg.Keybindings.FetchRefresh == "" {
 		cfg.Keybindings.FetchRefresh = Defaults().Keybindings.FetchRefresh
 	}
@@ -108,6 +123,12 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Keybindings.Help == "" {
 		cfg.Keybindings.Help = Defaults().Keybindings.Help
+	}
+	if cfg.Editor.Command == "" {
+		cfg.Editor.Command = Defaults().Editor.Command
+	}
+	if cfg.Editor.Args == nil {
+		cfg.Editor.Args = append([]string(nil), Defaults().Editor.Args...)
 	}
 	if cfg.Git.BaseBranch == "" {
 		cfg.Git.BaseBranch = Defaults().Git.BaseBranch
