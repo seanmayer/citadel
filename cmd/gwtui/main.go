@@ -10,6 +10,7 @@ import (
 	"github.com/seanmayer/citadel/internal/app"
 	"github.com/seanmayer/citadel/internal/commands"
 	"github.com/seanmayer/citadel/internal/config"
+	"github.com/seanmayer/citadel/internal/editor"
 	"github.com/seanmayer/citadel/internal/git"
 )
 
@@ -38,7 +39,8 @@ func run() error {
 	}
 
 	commandService := commands.NewService(gitService)
-	model := app.New(cfg, gitService, commandService, repoRoot)
+	editorService := editor.NewService(cfg.Editor, nil)
+	model := app.New(cfg, gitService, commandService, editorService, repoRoot)
 
 	program := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := program.Run(); err != nil {

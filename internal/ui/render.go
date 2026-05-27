@@ -157,6 +157,9 @@ func (r Renderer) renderDetailPane(vm ViewModel) string {
 			r.detailLine("Dirty", dirty),
 			r.detailLine("Status error", fallbackValue(worktree.Status.Error, "none")),
 		}
+		if !worktree.IsBare && vm.Mode == ModeList {
+			lines = append(lines, "", r.styles.Subtle.Render(fmt.Sprintf("Press %s to open this worktree in the editor.", r.keys.OpenEditor.Help().Key)))
+		}
 		if worktree.CanCreateBranch() && vm.Mode == ModeList {
 			lines = append(lines, "", r.styles.Subtle.Render("Press b to create a branch for this worktree."))
 		}
@@ -210,6 +213,7 @@ func (r Renderer) renderHelp(vm ViewModel) string {
 		"",
 		r.helpLine(r.keys.Up),
 		r.helpLine(r.keys.Down),
+		r.helpLine(r.keys.OpenEditor),
 		r.helpLine(r.keys.Create),
 		r.helpLine(r.keys.Delete),
 		r.helpLine(r.keys.Enter),

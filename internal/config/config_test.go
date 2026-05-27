@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -15,7 +16,7 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 		t.Fatalf("Load() returned error: %v", err)
 	}
 
-	if cfg != Defaults() {
+	if !reflect.DeepEqual(cfg, Defaults()) {
 		t.Fatalf("Load() = %#v, want %#v", cfg, Defaults())
 	}
 
@@ -24,6 +25,15 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	}
 	if cfg.Git.FetchOnRefresh {
 		t.Fatalf("Git.FetchOnRefresh = true, want false")
+	}
+	if cfg.Keybindings.OpenEditor != Defaults().Keybindings.OpenEditor {
+		t.Fatalf("OpenEditor key = %q, want %q", cfg.Keybindings.OpenEditor, Defaults().Keybindings.OpenEditor)
+	}
+	if cfg.Editor.Command != Defaults().Editor.Command {
+		t.Fatalf("Editor.Command = %q, want %q", cfg.Editor.Command, Defaults().Editor.Command)
+	}
+	if !reflect.DeepEqual(cfg.Editor.Args, Defaults().Editor.Args) {
+		t.Fatalf("Editor.Args = %#v, want %#v", cfg.Editor.Args, Defaults().Editor.Args)
 	}
 	if !cfg.Git.ShowRemoteStatus {
 		t.Fatalf("Git.ShowRemoteStatus = false, want true")
@@ -41,7 +51,7 @@ func TestLoadMergesDefaults(t *testing.T) {
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	content := []byte("default_command: git fetch\nui:\n  show_commit_hash: false\n")
+	content := []byte("default_command: git fetch\neditor:\n  command: zed\n  args:\n    - .\nkeybindings:\n  open_editor: e\nui:\n  show_commit_hash: false\n")
 	if err := os.WriteFile(path, content, 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -56,6 +66,15 @@ func TestLoadMergesDefaults(t *testing.T) {
 	}
 	if cfg.UI.ShowCommitHash {
 		t.Fatalf("ShowCommitHash = true, want false")
+	}
+	if cfg.Keybindings.OpenEditor != "e" {
+		t.Fatalf("OpenEditor key = %q, want %q", cfg.Keybindings.OpenEditor, "e")
+	}
+	if cfg.Editor.Command != "zed" {
+		t.Fatalf("Editor.Command = %q, want %q", cfg.Editor.Command, "zed")
+	}
+	if !reflect.DeepEqual(cfg.Editor.Args, []string{"."}) {
+		t.Fatalf("Editor.Args = %#v, want %#v", cfg.Editor.Args, []string{"."})
 	}
 	if cfg.Keybindings.Refresh != Defaults().Keybindings.Refresh {
 		t.Fatalf("Refresh key = %q, want %q", cfg.Keybindings.Refresh, Defaults().Keybindings.Refresh)

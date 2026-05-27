@@ -1,6 +1,6 @@
 # gwtui
 
-`gwtui` is a Bubble Tea terminal UI for browsing Git worktrees and running Git commands inside the selected worktree.
+`gwtui` is a Bubble Tea terminal UI for browsing Git worktrees, opening the selected worktree in your editor, and running Git commands inside it.
 
 ## Features
 
@@ -9,6 +9,7 @@
 - Shows per-worktree status badges for remote tracking, merge state, and dirty state
 - Scrolls through worktrees with keyboard navigation
 - Shows selected worktree details, including branch, commit, upstream, ahead/behind counts, merge state, and dirty state
+- Opens the selected worktree in a configurable editor command, defaulting to VS Code via `code .`
 - Lets you create a branch for detached or branchless worktrees
 - Lets you delete a worktree and its local branch with a confirmation prompt
 - Opens a command mode to run raw Git commands like `git status`, `git fetch`, or `git log --oneline -5`
@@ -38,6 +39,7 @@ gwtui
 
 - `up` / `k`: move selection up
 - `down` / `j`: move selection down
+- `o`: open the selected worktree in the configured editor
 - `b`: create a branch for the selected detached or branchless worktree
 - `d`: delete the selected worktree and confirm with `y`
 - `enter`: open command mode or run the command
@@ -79,10 +81,16 @@ Example config:
 default_command: "git status"
 
 keybindings:
+  open_editor: "o"
   refresh: "r"
   fetch_refresh: "R"
   quit: "q"
   help: "?"
+
+editor:
+  command: "code"
+  args:
+    - "."
 
 git:
   base_branch: "origin/main"
@@ -103,6 +111,9 @@ Config notes:
 - `git.show_remote_status`: show `local` and `↑N` / `↓N` badges
 - `git.show_merge_status`: show `merged` / `not merged` badges
 - `git.show_dirty_status`: show `clean` / `dirty` badges
+- `keybindings.open_editor`: key used to launch the selected worktree in the editor
+- `editor.command`: executable used to launch the editor, such as `code`, `zed`, or `open`
+- `editor.args`: optional args passed before launch; the selected worktree is the command working directory, and `{path}` expands to its full path
 
 See [config.example.yaml](config.example.yaml) for a ready-to-copy example.
 
