@@ -43,8 +43,8 @@ func DefaultStyles() Styles {
 			Padding(1, 2),
 		Selected: lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#0D1B1E")).
-			Background(lipgloss.Color("#00D7AF")).
+			Foreground(lipgloss.Color("#08141A")).
+			Background(lipgloss.Color("#5FD7FF")).
 			Padding(0, 1),
 		CurrentBadge: lipgloss.NewStyle().
 			Bold(true).
