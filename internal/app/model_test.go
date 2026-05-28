@@ -71,13 +71,17 @@ func (s *stubCommandService) Execute(_ context.Context, worktreePath string, raw
 }
 
 type stubEditorService struct {
-	paths []string
-	err   error
+	paths  []string
+	output string
+	err    error
 }
 
-func (s *stubEditorService) Open(_ context.Context, worktreePath string) error {
+func (s *stubEditorService) Open(_ context.Context, worktreePath string) (string, error) {
 	s.paths = append(s.paths, worktreePath)
-	return s.err
+	if s.output == "" {
+		return "(no output)", s.err
+	}
+	return s.output, s.err
 }
 
 func TestCreateBranchKeyEntersCreateModeForBranchlessWorktree(t *testing.T) {
@@ -193,6 +197,123 @@ func TestCreateBranchModeRunsGitSwitchCreateAndRefreshes(t *testing.T) {
 	}
 	if len(worktreesMsg.worktrees) != 1 || worktreesMsg.worktrees[0].Branch != "feature/demo" {
 		t.Fatalf("reloaded worktrees = %#v, want branch feature/demo", worktreesMsg.worktrees)
+	}
+}
+
+func TestStageAllRunsGitAddAndRefreshes(t *testing.T) {
+	t.Parallel()
+
+	gitService := &stubGitService{
+		worktrees: []git.Worktree{{
+			Path:   "/repo/feature",
+			Branch: "feature/demo",
+		}},
+	}
+	commandService := &stubCommandService{}
+	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, "/repo")
+	model.worktrees = gitService.worktrees
+
+	next, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	updated := next.(*Model)
+	if cmd == nil {
+		t.Fatal("stage all command = nil, want command")
+	}
+	if updated.statusMessage != "Staging all changes..." {
+		t.Fatalf("statusMessage = %q, want staging message", updated.statusMessage)
+	}
+
+	msg := cmd()
+	finished, ok := msg.(commandFinishedMsg)
+	if !ok {
+		t.Fatalf("message type = %T, want commandFinishedMsg", msg)
+	}
+	if len(commandService.calls) != 1 {
+		t.Fatalf("Execute() call count = %d, want 1", len(commandService.calls))
+	}
+	if commandService.calls[0].raw != "git add ." {
+		t.Fatalf("raw command = %q, want %q", commandService.calls[0].raw, "git add .")
+	}
+
+	next, refreshCmd := updated.Update(finished)
+	updated = next.(*Model)
+	if updated.state != ui.ModeOutput {
+		t.Fatalf("state = %q, want %q", updated.state, ui.ModeOutput)
+	}
+	if updated.statusMessage != "Staged all changes." {
+		t.Fatalf("statusMessage = %q, want %q", updated.statusMessage, "Staged all changes.")
+	}
+	if refreshCmd == nil {
+		t.Fatal("refresh command = nil, want reload command")
+	}
+}
+
+func TestCommitKeyEntersCommitMode(t *testing.T) {
+	t.Parallel()
+
+	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, &stubEditorService{}, "/repo")
+	model.width = 120
+	model.height = 40
+	model.worktrees = []git.Worktree{{
+		Path:   "/repo/feature",
+		Branch: "feature/demo",
+	}}
+
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	updated := next.(*Model)
+
+	if updated.state != ui.ModeCommit {
+		t.Fatalf("state = %q, want %q", updated.state, ui.ModeCommit)
+	}
+	if updated.statusMessage != "Commit mode." {
+		t.Fatalf("statusMessage = %q, want %q", updated.statusMessage, "Commit mode.")
+	}
+}
+
+func TestCommitModeRunsGitCommitAndRefreshes(t *testing.T) {
+	t.Parallel()
+
+	gitService := &stubGitService{
+		worktrees: []git.Worktree{{
+			Path:   "/repo/feature",
+			Branch: "feature/demo",
+		}},
+	}
+	commandService := &stubCommandService{}
+	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, "/repo")
+	model.width = 120
+	model.height = 40
+	model.worktrees = gitService.worktrees
+	model.state = ui.ModeCommit
+	model.commitInput.SetValue("feat: save worktree changes")
+
+	next, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*Model)
+	if cmd == nil {
+		t.Fatal("commit command = nil, want command")
+	}
+
+	msg := cmd()
+	finished, ok := msg.(commandFinishedMsg)
+	if !ok {
+		t.Fatalf("message type = %T, want commandFinishedMsg", msg)
+	}
+	if len(commandService.calls) != 1 {
+		t.Fatalf("Execute() call count = %d, want 1", len(commandService.calls))
+	}
+	if commandService.calls[0].raw != `git commit -m "feat: save worktree changes"` {
+		t.Fatalf("raw command = %q, want commit command", commandService.calls[0].raw)
+	}
+
+	next, refreshCmd := updated.Update(finished)
+	updated = next.(*Model)
+	if updated.state != ui.ModeOutput {
+		t.Fatalf("state = %q, want %q", updated.state, ui.ModeOutput)
+	}
+	if updated.statusMessage != "Committed changes." {
+		t.Fatalf("statusMessage = %q, want %q", updated.statusMessage, "Committed changes.")
+	}
+	if refreshCmd == nil {
+		t.Fatal("refresh command = nil, want reload command")
 	}
 }
 
@@ -354,7 +475,7 @@ func TestDeleteModeForcesBranchDeletionWhenMergeStatusIsUnknown(t *testing.T) {
 func TestOpenEditorRunsForSelectedWorktree(t *testing.T) {
 	t.Parallel()
 
-	editorService := &stubEditorService{}
+	editorService := &stubEditorService{output: "editor launched"}
 	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, editorService, "/repo")
 	model.worktrees = []git.Worktree{{
 		Path:   "/repo/feature",
@@ -371,12 +492,15 @@ func TestOpenEditorRunsForSelectedWorktree(t *testing.T) {
 	}
 
 	msg := cmd()
-	finished, ok := msg.(editorOpenedMsg)
+	finished, ok := msg.(commandFinishedMsg)
 	if !ok {
-		t.Fatalf("message type = %T, want editorOpenedMsg", msg)
+		t.Fatalf("message type = %T, want commandFinishedMsg", msg)
 	}
 	if finished.err != nil {
 		t.Fatalf("editor open error = %v, want nil", finished.err)
+	}
+	if finished.result.Output != "editor launched" {
+		t.Fatalf("output = %q, want %q", finished.result.Output, "editor launched")
 	}
 	if len(editorService.paths) != 1 || editorService.paths[0] != "/repo/feature" {
 		t.Fatalf("opened paths = %#v, want /repo/feature", editorService.paths)
@@ -390,8 +514,11 @@ func TestOpenEditorRunsForSelectedWorktree(t *testing.T) {
 	if updated.errorMessage != "" {
 		t.Fatalf("errorMessage = %q, want empty", updated.errorMessage)
 	}
-	if updated.state != ui.ModeList {
-		t.Fatalf("state = %q, want %q", updated.state, ui.ModeList)
+	if updated.state != ui.ModeOutput {
+		t.Fatalf("state = %q, want %q", updated.state, ui.ModeOutput)
+	}
+	if updated.lastCommand != "code ." {
+		t.Fatalf("lastCommand = %q, want %q", updated.lastCommand, "code .")
 	}
 }
 

@@ -12,6 +12,8 @@ type KeyMap struct {
 	Up           key.Binding
 	Down         key.Binding
 	OpenEditor   key.Binding
+	StageAll     key.Binding
+	Commit       key.Binding
 	Create       key.Binding
 	Delete       key.Binding
 	Enter        key.Binding
@@ -36,6 +38,14 @@ func NewKeyMap(cfg config.Keybindings) KeyMap {
 		OpenEditor: key.NewBinding(
 			key.WithKeys(cfg.OpenEditor),
 			key.WithHelp(cfg.OpenEditor, "open editor"),
+		),
+		StageAll: key.NewBinding(
+			key.WithKeys("a"),
+			key.WithHelp("a", "git add ."),
+		),
+		Commit: key.NewBinding(
+			key.WithKeys("c"),
+			key.WithHelp("c", "commit changes"),
 		),
 		Create: key.NewBinding(
 			key.WithKeys("b"),
@@ -77,7 +87,7 @@ func NewKeyMap(cfg config.Keybindings) KeyMap {
 }
 
 func (k KeyMap) ShortHelp() string {
-	items := []key.Binding{k.Up, k.Down, k.OpenEditor, k.Create, k.Delete, k.Enter, k.Refresh, k.FetchRefresh, k.Back, k.Help, k.Quit}
+	items := []key.Binding{k.Up, k.Down, k.OpenEditor, k.StageAll, k.Commit, k.Create, k.Delete, k.Enter, k.Refresh, k.FetchRefresh, k.Back, k.Help, k.Quit}
 	return helpString(items)
 }
 

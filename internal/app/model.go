@@ -27,16 +27,12 @@ type CommandService interface {
 }
 
 type EditorService interface {
-	Open(ctx context.Context, worktreePath string) error
+	Open(ctx context.Context, worktreePath string) (string, error)
 }
 
 type worktreesLoadedMsg struct {
 	worktrees []git.Worktree
 	err       error
-}
-
-type editorOpenedMsg struct {
-	err error
 }
 
 type commandFinishedMsg struct {
@@ -64,6 +60,7 @@ type Model struct {
 	keys                ui.KeyMap
 	commandInput        *commands.InputModel
 	branchInput         *commands.InputModel
+	commitInput         *commands.InputModel
 	outputViewport      viewport.Model
 	deleteTarget        git.Worktree
 	deleteOptions       git.DeleteOptions
@@ -86,6 +83,7 @@ func New(cfg config.Config, gitService GitService, commandService CommandService
 		keys:                keys,
 		commandInput:        commands.NewInputModel(cfg.DefaultCommand),
 		branchInput:         commands.NewPromptInputModel("branch> ", "feature/my-branch", ""),
+		commitInput:         commands.NewPromptInputModel("message> ", "feat: describe changes", ""),
 		outputViewport:      viewport.New(80, 20),
 	}
 }
@@ -122,15 +120,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.errorMessage = ""
 		return m, nil
-	case editorOpenedMsg:
-		if msg.err != nil {
-			m.statusMessage = "Editor was not opened."
-			m.errorMessage = msg.err.Error()
-			return m, nil
-		}
-		m.statusMessage = "Opened worktree in editor."
-		m.errorMessage = ""
-		return m, nil
 	case commandFinishedMsg:
 		var validationErr *commands.ValidationError
 		if errors.As(msg.err, &validationErr) {
@@ -163,6 +152,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateCommand(msg)
 	case ui.ModeCreate:
 		return m.updateCreateBranch(msg)
+	case ui.ModeCommit:
+		return m.updateCommit(msg)
 	case ui.ModeDelete:
 		return m.updateDelete(msg)
 	case ui.ModeOutput:
@@ -186,6 +177,7 @@ func (m *Model) View() string {
 		Config:        m.config,
 		InputView:     m.commandInput.View(),
 		BranchInput:   m.branchInput.View(),
+		CommitInput:   m.commitInput.View(),
 		OutputView:    m.outputViewport.View(),
 		LastCommand:   m.lastCommand,
 		StatusMessage: m.statusMessage,
@@ -240,6 +232,35 @@ func (m *Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMessage = "Opening worktree in editor..."
 		m.errorMessage = ""
 		return m, m.openEditorCmd(worktree.Path)
+	case key.Matches(keyMsg, m.keys.StageAll):
+		worktree, ok := m.selectedWorktree()
+		if !ok {
+			return m, nil
+		}
+		if worktree.IsBare {
+			m.statusMessage = "Files were not staged."
+			m.errorMessage = "Cannot stage files in a bare worktree."
+			return m, nil
+		}
+		m.statusMessage = "Staging all changes..."
+		m.errorMessage = ""
+		return m, m.executeCommandCmd(worktree.Path, "git add .", true, "Staged all changes.")
+	case key.Matches(keyMsg, m.keys.Commit):
+		worktree, ok := m.selectedWorktree()
+		if !ok {
+			return m, nil
+		}
+		if worktree.IsBare {
+			m.statusMessage = "Commit was not created."
+			m.errorMessage = "Cannot commit files in a bare worktree."
+			return m, nil
+		}
+		m.commitInput.Reset()
+		m.commitInput.SetWidth(m.commandInputWidth())
+		m.state = ui.ModeCommit
+		m.statusMessage = "Commit mode."
+		m.errorMessage = ""
+		return m, m.commitInput.Focus()
 	case key.Matches(keyMsg, m.keys.Create):
 		worktree, ok := m.selectedWorktree()
 		if !ok {
@@ -367,6 +388,45 @@ func (m *Model) updateCreateBranch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *Model) updateCommit(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch {
+		case keyMsg.Type == tea.KeyCtrlC:
+			return m, tea.Quit
+		case key.Matches(keyMsg, m.keys.Back):
+			m.commitInput.Blur()
+			m.state = ui.ModeList
+			m.errorMessage = ""
+			m.statusMessage = "Returned to worktree list."
+			return m, nil
+		case key.Matches(keyMsg, m.keys.Help):
+			m.previousState = m.state
+			m.state = ui.ModeHelp
+			return m, nil
+		case key.Matches(keyMsg, m.keys.Enter):
+			worktree, ok := m.selectedWorktree()
+			if !ok {
+				return m, nil
+			}
+
+			message := m.commitInput.Value()
+			if message == "" {
+				m.statusMessage = "Commit was not created."
+				m.errorMessage = "Commit message is empty."
+				return m, nil
+			}
+
+			raw := fmt.Sprintf("git commit -m %q", message)
+			m.statusMessage = "Committing changes..."
+			m.errorMessage = ""
+			return m, m.executeCommandCmd(worktree.Path, raw, true, "Committed changes.")
+		}
+	}
+
+	cmd := m.commitInput.Update(msg)
+	return m, cmd
+}
+
 func (m *Model) updateDelete(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch {
@@ -490,21 +550,36 @@ func (m *Model) executeDeleteCmd(worktree git.Worktree, options git.DeleteOption
 
 func (m *Model) openEditorCmd(worktreePath string) tea.Cmd {
 	return func() tea.Msg {
+		commandLabel := m.editorCommandLabel(worktreePath)
 		if m.editorService == nil {
-			return editorOpenedMsg{err: errors.New("editor service is not configured")}
+			return commandFinishedMsg{
+				result: commands.Result{
+					Parsed: commands.ParsedCommand{Raw: commandLabel},
+					Output: "editor service is not configured",
+				},
+				err: errors.New("editor service is not configured"),
+			}
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		err := m.editorService.Open(ctx, worktreePath)
-		return editorOpenedMsg{err: err}
+		output, err := m.editorService.Open(ctx, worktreePath)
+		return commandFinishedMsg{
+			result: commands.Result{
+				Parsed: commands.ParsedCommand{Raw: commandLabel},
+				Output: output,
+			},
+			err:            err,
+			successMessage: "Opened worktree in editor.",
+		}
 	}
 }
 
 func (m *Model) resizeComponents() {
 	m.commandInput.SetWidth(m.commandInputWidth())
 	m.branchInput.SetWidth(m.commandInputWidth())
+	m.commitInput.SetWidth(m.commandInputWidth())
 
 	outputWidth := m.width - 8
 	outputHeight := m.height - 13
@@ -550,6 +625,20 @@ func (m *Model) commandInputWidth() int {
 		return 24
 	}
 	return width
+}
+
+func (m *Model) editorCommandLabel(worktreePath string) string {
+	command := strings.TrimSpace(m.config.Editor.Command)
+	if command == "" {
+		command = "editor"
+	}
+
+	parts := []string{command}
+	for _, arg := range m.config.Editor.Args {
+		parts = append(parts, strings.ReplaceAll(arg, "{path}", worktreePath))
+	}
+
+	return strings.Join(parts, " ")
 }
 
 func (m *Model) selectedWorktree() (git.Worktree, bool) {

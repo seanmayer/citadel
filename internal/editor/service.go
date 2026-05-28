@@ -64,9 +64,9 @@ func NewService(cfg config.EditorConfig, runner Runner) *Service {
 	}
 }
 
-func (s *Service) Open(ctx context.Context, worktreePath string) error {
+func (s *Service) Open(ctx context.Context, worktreePath string) (string, error) {
 	if s.config.Command == "" {
-		return errors.New("editor command is empty")
+		return "editor command is empty", errors.New("editor command is empty")
 	}
 
 	args := make([]string, 0, len(s.config.Args))
@@ -75,18 +75,29 @@ func (s *Service) Open(ctx context.Context, worktreePath string) error {
 	}
 
 	stdout, stderr, exitCode, err := s.runner.Run(ctx, worktreePath, s.config.Command, args...)
+	text := strings.TrimRight(combinedOutput(stdout, stderr), "\n")
+	if text == "" && err == nil && exitCode == 0 {
+		text = "(no output)"
+	}
+
 	if err != nil {
-		return fmt.Errorf("open editor in %q: %w", worktreePath, err)
+		if text == "" {
+			text = err.Error()
+		}
+		return text, fmt.Errorf("open editor in %q: %w", worktreePath, err)
 	}
 	if exitCode != 0 {
 		message := strings.TrimSpace(firstNonEmpty(stderr, stdout))
 		if message == "" {
 			message = fmt.Sprintf("editor command exited with status %d", exitCode)
 		}
-		return fmt.Errorf("open editor in %q: %s", worktreePath, message)
+		if text == "" {
+			text = message
+		}
+		return text, fmt.Errorf("open editor in %q: %s", worktreePath, message)
 	}
 
-	return nil
+	return text, nil
 }
 
 func firstNonEmpty(values ...string) string {
@@ -96,4 +107,18 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func combinedOutput(stdout string, stderr string) string {
+	stdout = strings.TrimRight(stdout, "\n")
+	stderr = strings.TrimRight(stderr, "\n")
+
+	switch {
+	case stdout == "":
+		return stderr
+	case stderr == "":
+		return stdout
+	default:
+		return stdout + "\n" + stderr
+	}
 }

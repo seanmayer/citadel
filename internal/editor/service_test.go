@@ -41,9 +41,12 @@ func TestOpenRunsConfiguredEditorInsideWorktree(t *testing.T) {
 		Args:    []string{"--reuse-window", "{path}"},
 	}, runner)
 
-	err := service.Open(context.Background(), "/repo/feature")
+	output, err := service.Open(context.Background(), "/repo/feature")
 	if err != nil {
 		t.Fatalf("Open() returned error: %v", err)
+	}
+	if output != "(no output)" {
+		t.Fatalf("output = %q, want %q", output, "(no output)")
 	}
 
 	if len(runner.calls) != 1 {
@@ -70,7 +73,7 @@ func TestOpenReturnsRunnerError(t *testing.T) {
 		Args:    []string{"."},
 	}, &stubRunner{err: errors.New("executable file not found")})
 
-	err := service.Open(context.Background(), "/repo/feature")
+	_, err := service.Open(context.Background(), "/repo/feature")
 	if err == nil {
 		t.Fatal("Open() error = nil, want error")
 	}
@@ -90,9 +93,12 @@ func TestOpenReturnsCommandOutputOnNonZeroExit(t *testing.T) {
 		exitCode: 1,
 	})
 
-	err := service.Open(context.Background(), "/repo/feature")
+	output, err := service.Open(context.Background(), "/repo/feature")
 	if err == nil {
 		t.Fatal("Open() error = nil, want error")
+	}
+	if output != "code command failed" {
+		t.Fatalf("output = %q, want %q", output, "code command failed")
 	}
 	if !strings.Contains(err.Error(), "code command failed") {
 		t.Fatalf("error = %q, want command output", err)
