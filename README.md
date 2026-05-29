@@ -10,9 +10,12 @@
 - Scrolls through worktrees with keyboard navigation
 - Shows selected worktree details, including branch, commit, upstream, ahead/behind counts, merge state, and dirty state
 - Opens the selected worktree in a configurable editor command, defaulting to VS Code via `code .`
+- Shows a per-worktree action list with shortcuts for terminal commands, editor launch, staging, commit, branch creation, and delete
 - Lets you create a branch for detached or branchless worktrees
 - Lets you delete a worktree and its local branch with a confirmation prompt
 - Opens a command mode to run raw Git commands like `git status`, `git fetch`, or `git log --oneline -5`
+- Stages all files in the selected worktree with `git add .`
+- Opens a commit message prompt and runs `git commit -m "..."` in the selected worktree
 - Displays command output directly inside the TUI
 
 ## Install
@@ -40,6 +43,8 @@ gwtui
 - `up` / `k`: move selection up
 - `down` / `j`: move selection down
 - `o`: open the selected worktree in the configured editor
+- `a`: stage all files in the selected worktree with `git add .`
+- `c`: open commit mode and write the commit message for `git commit -m "..."`
 - `b`: create a branch for the selected detached or branchless worktree
 - `d`: delete the selected worktree and confirm with `y`
 - `enter`: open command mode or run the command

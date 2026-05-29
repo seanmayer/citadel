@@ -19,6 +19,7 @@ const (
 	ModeList    Mode = "list"
 	ModeCommand Mode = "command"
 	ModeCreate  Mode = "create-branch"
+	ModeCommit  Mode = "commit"
 	ModeDelete  Mode = "delete-worktree"
 	ModeOutput  Mode = "output"
 	ModeHelp    Mode = "help"
@@ -35,6 +36,7 @@ type ViewModel struct {
 	Config        config.Config
 	InputView     string
 	BranchInput   string
+	CommitInput   string
 	OutputView    string
 	LastCommand   string
 	StatusMessage string
@@ -159,21 +161,12 @@ func (r Renderer) renderDetailPane(vm ViewModel) string {
 			r.detailLine("Dirty", dirty),
 			r.detailLine("Status error", fallbackValue(worktree.Status.Error, "none")),
 		}
-		if !worktree.IsBare && vm.Mode == ModeList {
-			lines = append(lines, "", r.styles.Subtle.Render(fmt.Sprintf("Press %s to open this worktree in the editor.", r.keys.OpenEditor.Help().Key)))
-		}
-		if worktree.CanCreateBranch() && vm.Mode == ModeList {
-			lines = append(lines, "", r.styles.Subtle.Render("Press b to create a branch for this worktree."))
-		}
-		if vm.Mode == ModeList {
-			switch {
-			case worktree.IsCurrent:
-				lines = append(lines, "", r.styles.Subtle.Render("Current worktree cannot be deleted while gwtui is running in it."))
-			case !worktree.IsBare:
-				lines = append(lines, "", r.styles.Subtle.Render("Press d to delete this worktree."))
-			}
-		}
 		content = strings.Join(lines, "\n")
+	}
+
+	if vm.Mode == ModeList && len(vm.Worktrees) > 0 && vm.Selected >= 0 && vm.Selected < len(vm.Worktrees) {
+		actionPanel := r.styles.CommandBox.Render(r.renderActionList(vm, vm.Worktrees[vm.Selected]))
+		content = content + "\n\n" + actionPanel
 	}
 
 	if vm.Mode == ModeCommand {
@@ -191,6 +184,14 @@ func (r Renderer) renderDetailPane(vm ViewModel) string {
 				vm.BranchInput,
 		)
 		content = content + "\n\n" + branchPanel
+	}
+	if vm.Mode == ModeCommit {
+		commitPanel := r.styles.CommandBox.Render(
+			r.styles.Label.Render("Commit Changes") + "\n" +
+				r.styles.Subtle.Render("Type a commit message for the selected worktree.") + "\n\n" +
+				vm.CommitInput,
+		)
+		content = content + "\n\n" + commitPanel
 	}
 	if vm.Mode == ModeDelete && len(vm.Worktrees) > 0 && vm.Selected >= 0 && vm.Selected < len(vm.Worktrees) {
 		deletePanel := r.styles.CommandBox.Render(r.renderDeleteConfirmation(vm, vm.Worktrees[vm.Selected]))
@@ -216,6 +217,8 @@ func (r Renderer) renderHelp(vm ViewModel) string {
 		r.helpLine(r.keys.Up),
 		r.helpLine(r.keys.Down),
 		r.helpLine(r.keys.OpenEditor),
+		r.helpLine(r.keys.StageAll),
+		r.helpLine(r.keys.Commit),
 		r.helpLine(r.keys.Create),
 		r.helpLine(r.keys.Delete),
 		r.helpLine(r.keys.Enter),
@@ -250,6 +253,37 @@ func (r Renderer) renderFooter(vm ViewModel) string {
 	if vm.ErrorMessage != "" {
 		lines = append(lines, r.styles.Error.Render(vm.ErrorMessage))
 	}
+	return strings.Join(lines, "\n")
+}
+
+func (r Renderer) renderActionList(vm ViewModel, worktree git.Worktree) string {
+	lines := []string{
+		r.styles.Label.Render("Actions"),
+		r.styles.Subtle.Render(fmt.Sprintf("Press %s to open terminal command mode.", r.keys.Enter.Help().Key)),
+	}
+
+	if worktree.IsBare {
+		lines = append(lines, r.styles.Subtle.Render("Bare worktrees cannot open an editor, stage files, or create commits."))
+		return strings.Join(lines, "\n")
+	}
+
+	lines = append(lines,
+		r.styles.Subtle.Render(fmt.Sprintf("Press %s to open this worktree in the editor.", r.keys.OpenEditor.Help().Key)),
+		r.styles.Subtle.Render(fmt.Sprintf("Press %s to stage all files with git add .", r.keys.StageAll.Help().Key)),
+		r.styles.Subtle.Render(fmt.Sprintf("Press %s to commit files with a message.", r.keys.Commit.Help().Key)),
+	)
+
+	if worktree.CanCreateBranch() {
+		lines = append(lines, r.styles.Subtle.Render(fmt.Sprintf("Press %s to create a branch for this worktree.", r.keys.Create.Help().Key)))
+	}
+
+	switch {
+	case worktree.IsCurrent:
+		lines = append(lines, r.styles.Subtle.Render("Current worktree cannot be deleted while gwtui is running in it."))
+	default:
+		lines = append(lines, r.styles.Subtle.Render(fmt.Sprintf("Press %s to delete this worktree.", r.keys.Delete.Help().Key)))
+	}
+
 	return strings.Join(lines, "\n")
 }
 
