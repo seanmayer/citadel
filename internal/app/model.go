@@ -35,12 +35,16 @@ type worktreesLoadedMsg struct {
 	err       error
 }
 
+type splashFinishedMsg struct{}
+
 type commandFinishedMsg struct {
 	result         commands.Result
 	err            error
 	refresh        bool
 	successMessage string
 }
+
+const startupSplashDuration = 1200 * time.Millisecond
 
 type Model struct {
 	config              config.Config
@@ -78,7 +82,7 @@ func New(cfg config.Config, gitService GitService, commandService CommandService
 		editorService:       editorService,
 		repoRoot:            currentWorktreePath,
 		currentWorktreePath: currentWorktreePath,
-		state:               ui.ModeList,
+		state:               ui.ModeSplash,
 		renderer:            ui.NewRenderer(cfg),
 		keys:                keys,
 		commandInput:        commands.NewInputModel(cfg.DefaultCommand),
@@ -89,7 +93,10 @@ func New(cfg config.Config, gitService GitService, commandService CommandService
 }
 
 func (m *Model) Init() tea.Cmd {
-	return m.loadWorktreesCmd(false)
+	return tea.Batch(
+		m.loadWorktreesCmd(false),
+		m.splashTimerCmd(),
+	)
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -115,10 +122,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selected = len(m.worktrees) - 1
 		}
 		m.ensureSelectionVisible()
-		if m.state != ui.ModeOutput {
+		if m.state != ui.ModeOutput && m.state != ui.ModeSplash {
 			m.statusMessage = fmt.Sprintf("Loaded %d worktree(s)", len(m.worktrees))
 		}
 		m.errorMessage = ""
+		return m, nil
+	case splashFinishedMsg:
+		if m.state == ui.ModeSplash {
+			m.state = ui.ModeList
+		}
 		return m, nil
 	case commandFinishedMsg:
 		var validationErr *commands.ValidationError
@@ -148,6 +160,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch m.state {
+	case ui.ModeSplash:
+		return m.updateSplash(msg)
 	case ui.ModeCommand:
 		return m.updateCommand(msg)
 	case ui.ModeCreate:
@@ -163,6 +177,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	default:
 		return m.updateList(msg)
 	}
+}
+
+func (m *Model) updateSplash(msg tea.Msg) (tea.Model, tea.Cmd) {
+	keyMsg, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+
+	if keyMsg.Type == tea.KeyCtrlC || key.Matches(keyMsg, m.keys.Quit) {
+		return m, tea.Quit
+	}
+
+	m.state = ui.ModeList
+	return m.updateList(msg)
 }
 
 func (m *Model) View() string {
@@ -513,6 +541,12 @@ func (m *Model) loadWorktreesCmd(forceFetch bool) tea.Cmd {
 			err:       err,
 		}
 	}
+}
+
+func (m *Model) splashTimerCmd() tea.Cmd {
+	return tea.Tick(startupSplashDuration, func(time.Time) tea.Msg {
+		return splashFinishedMsg{}
+	})
 }
 
 func (m *Model) executeCommandCmd(worktreePath string, raw string, refresh bool, successMessage string) tea.Cmd {

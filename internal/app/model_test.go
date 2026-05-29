@@ -84,6 +84,29 @@ func (s *stubEditorService) Open(_ context.Context, worktreePath string) (string
 	return s.output, s.err
 }
 
+func TestNewStartsInSplashMode(t *testing.T) {
+	t.Parallel()
+
+	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, &stubEditorService{}, "/repo")
+
+	if model.state != ui.ModeSplash {
+		t.Fatalf("state = %q, want %q", model.state, ui.ModeSplash)
+	}
+}
+
+func TestSplashFinishedTransitionsToList(t *testing.T) {
+	t.Parallel()
+
+	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, &stubEditorService{}, "/repo")
+
+	next, _ := model.Update(splashFinishedMsg{})
+	updated := next.(*Model)
+
+	if updated.state != ui.ModeList {
+		t.Fatalf("state = %q, want %q", updated.state, ui.ModeList)
+	}
+}
+
 func TestCreateBranchKeyEntersCreateModeForBranchlessWorktree(t *testing.T) {
 	t.Parallel()
 

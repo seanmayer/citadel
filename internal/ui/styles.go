@@ -8,6 +8,9 @@ type Styles struct {
 	Subtle        lipgloss.Style
 	Label         lipgloss.Style
 	Value         lipgloss.Style
+	SplashBox     lipgloss.Style
+	SplashMark    lipgloss.Style
+	SplashTag     lipgloss.Style
 	Panel         lipgloss.Style
 	Selected      lipgloss.Style
 	CurrentBadge  lipgloss.Style
@@ -37,6 +40,16 @@ func DefaultStyles() Styles {
 			Foreground(lipgloss.Color("#5FD7FF")),
 		Value: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#EAF7F7")),
+		SplashBox: lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(lipgloss.Color("#3A5568")).
+			Padding(1, 3).
+			Align(lipgloss.Center),
+		SplashMark: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#EAF7F7")),
+		SplashTag: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#00D7AF")),
 		Panel: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("#3A5568")).
