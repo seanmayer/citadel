@@ -172,7 +172,7 @@ func (r Renderer) renderDetailPane(vm ViewModel) string {
 	if vm.Mode == ModeCommand {
 		commandPanel := r.styles.CommandBox.Render(
 			r.styles.Label.Render("Command Mode") + "\n" +
-				r.styles.Subtle.Render("Run a git command in the selected worktree.") + "\n\n" +
+				r.styles.Subtle.Render("Run a git command or the built-in hot push workflow in the selected worktree.") + "\n\n" +
 				vm.InputView,
 		)
 		content = content + "\n\n" + commandPanel
@@ -218,6 +218,7 @@ func (r Renderer) renderHelp(vm ViewModel) string {
 		r.helpLine(r.keys.Down),
 		r.helpLine(r.keys.OpenEditor),
 		r.helpLine(r.keys.StageAll),
+		r.helpLine(r.keys.HotPush),
 		r.helpLine(r.keys.Commit),
 		r.helpLine(r.keys.Create),
 		r.helpLine(r.keys.Delete),
@@ -270,6 +271,7 @@ func (r Renderer) renderActionList(vm ViewModel, worktree git.Worktree) string {
 	lines = append(lines,
 		r.styles.Subtle.Render(fmt.Sprintf("Press %s to open this worktree in the editor.", r.keys.OpenEditor.Help().Key)),
 		r.styles.Subtle.Render(fmt.Sprintf("Press %s to stage all files with git add .", r.keys.StageAll.Help().Key)),
+		r.styles.Subtle.Render(fmt.Sprintf("Press %s to fetch, pull, add, commit, and push with hot push.", r.keys.HotPush.Help().Key)),
 		r.styles.Subtle.Render(fmt.Sprintf("Press %s to commit files with a message.", r.keys.Commit.Help().Key)),
 	)
 
