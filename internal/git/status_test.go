@@ -9,6 +9,7 @@ import (
 
 type fakeRunner struct {
 	results map[string]fakeResult
+	calls   []string
 }
 
 type fakeResult struct {
@@ -29,6 +30,7 @@ func (f *fakeRunner) stub(dir string, name string, result fakeResult, args ...st
 }
 
 func (f *fakeRunner) Run(dir string, name string, args ...string) (stdout string, stderr string, exitCode int, err error) {
+	f.calls = append(f.calls, f.key(dir, name, args...))
 	result, ok := f.results[f.key(dir, name, args...)]
 	if !ok {
 		return "", "", -1, fmt.Errorf("unexpected command: dir=%q name=%q args=%q", dir, name, strings.Join(args, " "))
@@ -120,6 +122,48 @@ func TestGetUpstream(t *testing.T) {
 		}
 		if upstream != "" {
 			t.Fatalf("GetUpstream() upstream = %q, want empty string", upstream)
+		}
+	})
+}
+
+func TestOpenPullRequest(t *testing.T) {
+	t.Parallel()
+
+	t.Run("opens pull request in browser", func(t *testing.T) {
+		t.Parallel()
+
+		runner := newFakeRunner()
+		runner.stub("/repo", "gh", fakeResult{exitCode: 0}, "pr", "view", "feature/test", "--web")
+
+		service := NewService(runner)
+		output, err := service.OpenPullRequest(context.Background(), "/repo", "feature/test")
+		if err != nil {
+			t.Fatalf("OpenPullRequest() error = %v", err)
+		}
+		if output != "(no output)" {
+			t.Fatalf("output = %q, want %q", output, "(no output)")
+		}
+	})
+
+	t.Run("returns gh command output on failure", func(t *testing.T) {
+		t.Parallel()
+
+		runner := newFakeRunner()
+		runner.stub("/repo", "gh", fakeResult{
+			stderr:   "no pull requests found for branch \"feature/test\"\n",
+			exitCode: 1,
+		}, "pr", "view", "feature/test", "--web")
+
+		service := NewService(runner)
+		output, err := service.OpenPullRequest(context.Background(), "/repo", "feature/test")
+		if err == nil {
+			t.Fatal("OpenPullRequest() error = nil, want error")
+		}
+		if output != "no pull requests found for branch \"feature/test\"" {
+			t.Fatalf("output = %q, want gh error output", output)
+		}
+		if !strings.Contains(err.Error(), "no pull requests found") {
+			t.Fatalf("error = %q, want gh error context", err)
 		}
 	})
 }

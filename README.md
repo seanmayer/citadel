@@ -11,13 +11,16 @@
 - Shows selected worktree details, including branch, commit, upstream, ahead/behind counts, merge state, and dirty state
 - Opens the selected worktree in a configurable editor command, defaulting to VS Code via `code .`
 - Opens the selected worktree in a configurable terminal command
+- Opens the selected branch's pull request in the browser via GitHub CLI when one exists
 - Shows a per-worktree action list with shortcuts for terminal commands, editor launch, staging, commit, branch creation, and delete
 - Lets you create a branch for detached or branchless worktrees
 - Lets you delete a worktree and its local branch with a confirmation prompt
 - Opens a command mode to run raw Git commands like `git status`, `git fetch`, or `git log --oneline -5`
 - Stages all files in the selected worktree with `git add .`
+- Runs a built-in `hot push` workflow that fetches, pulls, stages, commits with `hot push`, and pushes, retrying on a new remote branch if the original push is rejected for being behind remote
 - Opens a commit message prompt and runs `git commit -m "..."` in the selected worktree
 - Displays command output directly inside the TUI
+- Optionally auto-refreshes the worktree list and status on a configurable interval
 
 ## Install
 
@@ -45,7 +48,9 @@ gwtui
 - `down` / `j`: move selection down
 - `o`: open the selected worktree in the configured editor
 - `t`: open the selected worktree in a new terminal
+- `P`: open the selected branch's pull request in the browser when one exists
 - `a`: stage all files in the selected worktree with `git add .`
+- `p`: run the built-in `hot push` workflow in the selected worktree
 - `c`: open commit mode and write the commit message for `git commit -m "..."`
 - `b`: create a branch for the selected detached or branchless worktree
 - `d`: delete the selected worktree and confirm with `y`
@@ -56,6 +61,8 @@ gwtui
 - `esc`: leave command mode or output view
 - `?`: show help
 - `q` / `ctrl+c`: quit
+
+In command mode, you can also run `hot push` or `git hot push` as a built-in workflow instead of a raw Git subcommand.
 
 ## Status Badges
 
@@ -110,6 +117,7 @@ terminal:
 git:
   base_branch: "origin/main"
   fetch_on_refresh: false
+  auto_refresh_interval: "30s"
   show_remote_status: true
   show_merge_status: true
   show_dirty_status: true
@@ -123,6 +131,7 @@ Config notes:
 
 - `git.base_branch`: branch or ref used for merge checks, such as `origin/main`
 - `git.fetch_on_refresh`: if `true`, `r` runs `git fetch --prune` before status refresh
+- `git.auto_refresh_interval`: duration such as `30s` or `2m`; `0s` disables automatic refresh. Auto-refresh runs only on the main list view and uses the same refresh behavior as `r`.
 - `git.show_remote_status`: show `local` and `↑N` / `↓N` badges
 - `git.show_merge_status`: show `merged` / `not merged` badges
 - `git.show_dirty_status`: show `clean` / `dirty` badges
@@ -134,6 +143,7 @@ Config notes:
 - `terminal.args`: optional args passed before launch; the selected worktree is the command working directory, and `{path}` expands to its full path
 
 The default terminal launcher is platform-specific. The example above shows the macOS default.
+- `P` uses `gh pr view <branch> --web`, so it requires the GitHub CLI to be installed and able to resolve the branch's pull request
 
 See [config.example.yaml](config.example.yaml) for a ready-to-copy example.
 
