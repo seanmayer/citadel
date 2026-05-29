@@ -91,7 +91,7 @@ func Defaults() Config {
 		Git: GitConfig{
 			BaseBranch:          "origin/main",
 			FetchOnRefresh:      false,
-			AutoRefreshInterval: Duration{Duration: 0},
+			AutoRefreshInterval: Duration{Duration: 30 * time.Second},
 			ShowRemoteStatus:    true,
 			ShowMergeStatus:     true,
 			ShowDirtyStatus:     true,

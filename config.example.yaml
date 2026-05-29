@@ -15,7 +15,7 @@ editor:
 git:
   base_branch: "origin/main"
   fetch_on_refresh: false
-  auto_refresh_interval: "0s"
+  auto_refresh_interval: "30s"
   show_remote_status: true
   show_merge_status: true
   show_dirty_status: true
