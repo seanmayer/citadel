@@ -10,6 +10,7 @@
 - Scrolls through worktrees with keyboard navigation
 - Shows selected worktree details, including branch, commit, upstream, ahead/behind counts, merge state, and dirty state
 - Opens the selected worktree in a configurable editor command, defaulting to VS Code via `code .`
+- Opens the selected branch's pull request in the browser via GitHub CLI when one exists
 - Shows a per-worktree action list with shortcuts for terminal commands, editor launch, staging, commit, branch creation, and delete
 - Lets you create a branch for detached or branchless worktrees
 - Lets you delete a worktree and its local branch with a confirmation prompt
@@ -45,6 +46,7 @@ gwtui
 - `up` / `k`: move selection up
 - `down` / `j`: move selection down
 - `o`: open the selected worktree in the configured editor
+- `P`: open the selected branch's pull request in the browser when one exists
 - `a`: stage all files in the selected worktree with `git add .`
 - `p`: run the built-in `hot push` workflow in the selected worktree
 - `c`: open commit mode and write the commit message for `git commit -m "..."`
@@ -126,6 +128,7 @@ Config notes:
 - `keybindings.open_editor`: key used to launch the selected worktree in the editor
 - `editor.command`: executable used to launch the editor, such as `code`, `zed`, or `open`
 - `editor.args`: optional args passed before launch; the selected worktree is the command working directory, and `{path}` expands to its full path
+- `P` uses `gh pr view <branch> --web`, so it requires the GitHub CLI to be installed and able to resolve the branch's pull request
 
 See [config.example.yaml](config.example.yaml) for a ready-to-copy example.
 

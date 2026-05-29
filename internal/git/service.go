@@ -195,6 +195,38 @@ func (s *Service) FetchRemoteState(ctx context.Context, repoRoot string) error {
 	return nil
 }
 
+func (s *Service) OpenPullRequest(ctx context.Context, worktreePath string, branch string) (string, error) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return "branch name is empty", errors.New("branch name is empty")
+	}
+
+	stdout, stderr, exitCode, err := s.run(ctx, worktreePath, "gh", "pr", "view", branch, "--web")
+	text := strings.TrimRight(combinedText(stdout, stderr), "\n")
+	if text == "" && err == nil && exitCode == 0 {
+		text = "(no output)"
+	}
+
+	if err != nil {
+		if text == "" {
+			text = err.Error()
+		}
+		return text, fmt.Errorf("open pull request for branch %q in %q: %w", branch, worktreePath, err)
+	}
+	if exitCode != 0 {
+		message := strings.TrimSpace(firstNonEmpty(stderr, stdout))
+		if message == "" {
+			message = fmt.Sprintf("gh pr view exited with status %d", exitCode)
+		}
+		if text == "" {
+			text = message
+		}
+		return text, fmt.Errorf("open pull request for branch %q in %q: %s", branch, worktreePath, message)
+	}
+
+	return text, nil
+}
+
 func (s *Service) DeleteWorktree(ctx context.Context, repoRoot string, worktree Worktree, options DeleteOptions) (string, error) {
 	transcript := make([]string, 0, 2)
 
