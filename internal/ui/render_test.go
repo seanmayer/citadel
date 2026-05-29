@@ -28,7 +28,7 @@ func TestRenderOutputShowsContinueCallToAction(t *testing.T) {
 	}
 }
 
-func TestRenderDetailsShowsWorktreeActionList(t *testing.T) {
+func TestRenderListShowsWorktreeActionList(t *testing.T) {
 	t.Parallel()
 
 	renderer := NewRenderer(config.Defaults())
@@ -41,6 +41,8 @@ func TestRenderDetailsShowsWorktreeActionList(t *testing.T) {
 			Path:   "/repo/feature",
 			Branch: "feature/demo",
 		}},
+		Selected: 0,
+		Config:   config.Defaults(),
 	})
 
 	for _, snippet := range []string{
@@ -52,5 +54,27 @@ func TestRenderDetailsShowsWorktreeActionList(t *testing.T) {
 		if !strings.Contains(view, snippet) {
 			t.Fatalf("rendered view missing %q:\n%s", snippet, view)
 		}
+	}
+}
+
+func TestRenderListMarksSelectedWorktree(t *testing.T) {
+	t.Parallel()
+
+	renderer := NewRenderer(config.Defaults())
+	view := renderer.Render(ViewModel{
+		Mode:     ModeList,
+		Width:    100,
+		Height:   30,
+		RepoRoot: "/repo",
+		Worktrees: []git.Worktree{
+			{Path: "/repo", Branch: "main"},
+			{Path: "/repo/feature", Branch: "feature/demo"},
+		},
+		Selected: 1,
+		Config:   config.Defaults(),
+	})
+
+	if !strings.Contains(view, "> feature/demo") {
+		t.Fatalf("rendered view missing selected marker:\n%s", view)
 	}
 }

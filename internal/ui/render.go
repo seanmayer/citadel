@@ -102,7 +102,9 @@ func (r Renderer) renderListPane(vm ViewModel) string {
 			}
 
 			if i == vm.Selected {
-				row = r.styles.Selected.Render(row)
+				row = r.styles.Selected.Render("> " + row)
+			} else {
+				row = "  " + row
 			}
 
 			rows = append(rows, row)
