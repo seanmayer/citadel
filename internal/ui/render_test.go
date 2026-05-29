@@ -48,6 +48,7 @@ func TestRenderListShowsWorktreeActionList(t *testing.T) {
 	for _, snippet := range []string{
 		"Actions",
 		"open terminal command mode",
+		"open this worktree in a new terminal",
 		"git add .",
 		"commit files with a message",
 	} {

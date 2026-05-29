@@ -2,6 +2,7 @@ default_command: "git status"
 
 keybindings:
   open_editor: "o"
+  open_terminal: "t"
   refresh: "r"
   fetch_refresh: "R"
   quit: "q"
@@ -11,6 +12,14 @@ editor:
   command: "code"
   args:
     - "."
+
+# macOS example; adjust for your terminal app on other platforms.
+terminal:
+  command: "open"
+  args:
+    - "-a"
+    - "Terminal"
+    - "{path}"
 
 git:
   base_branch: "origin/main"

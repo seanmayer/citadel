@@ -1,6 +1,6 @@
 # gwtui
 
-`gwtui` is a Bubble Tea terminal UI for browsing Git worktrees, opening the selected worktree in your editor, and running Git commands inside it.
+`gwtui` is a Bubble Tea terminal UI for browsing Git worktrees, opening the selected worktree in your editor or terminal, and running Git commands inside it.
 
 ## Features
 
@@ -10,6 +10,7 @@
 - Scrolls through worktrees with keyboard navigation
 - Shows selected worktree details, including branch, commit, upstream, ahead/behind counts, merge state, and dirty state
 - Opens the selected worktree in a configurable editor command, defaulting to VS Code via `code .`
+- Opens the selected worktree in a configurable terminal command
 - Shows a per-worktree action list with shortcuts for terminal commands, editor launch, staging, commit, branch creation, and delete
 - Lets you create a branch for detached or branchless worktrees
 - Lets you delete a worktree and its local branch with a confirmation prompt
@@ -43,6 +44,7 @@ gwtui
 - `up` / `k`: move selection up
 - `down` / `j`: move selection down
 - `o`: open the selected worktree in the configured editor
+- `t`: open the selected worktree in a new terminal
 - `a`: stage all files in the selected worktree with `git add .`
 - `c`: open commit mode and write the commit message for `git commit -m "..."`
 - `b`: create a branch for the selected detached or branchless worktree
@@ -87,6 +89,7 @@ default_command: "git status"
 
 keybindings:
   open_editor: "o"
+  open_terminal: "t"
   refresh: "r"
   fetch_refresh: "R"
   quit: "q"
@@ -96,6 +99,13 @@ editor:
   command: "code"
   args:
     - "."
+
+terminal:
+  command: "open"
+  args:
+    - "-a"
+    - "Terminal"
+    - "{path}"
 
 git:
   base_branch: "origin/main"
@@ -117,8 +127,13 @@ Config notes:
 - `git.show_merge_status`: show `merged` / `not merged` badges
 - `git.show_dirty_status`: show `clean` / `dirty` badges
 - `keybindings.open_editor`: key used to launch the selected worktree in the editor
+- `keybindings.open_terminal`: key used to launch the selected worktree in a new terminal
 - `editor.command`: executable used to launch the editor, such as `code`, `zed`, or `open`
 - `editor.args`: optional args passed before launch; the selected worktree is the command working directory, and `{path}` expands to its full path
+- `terminal.command`: executable used to launch a terminal app, such as `open`, `wezterm`, or `wt`
+- `terminal.args`: optional args passed before launch; the selected worktree is the command working directory, and `{path}` expands to its full path
+
+The default terminal launcher is platform-specific. The example above shows the macOS default.
 
 See [config.example.yaml](config.example.yaml) for a ready-to-copy example.
 

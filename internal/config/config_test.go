@@ -29,11 +29,20 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	if cfg.Keybindings.OpenEditor != Defaults().Keybindings.OpenEditor {
 		t.Fatalf("OpenEditor key = %q, want %q", cfg.Keybindings.OpenEditor, Defaults().Keybindings.OpenEditor)
 	}
+	if cfg.Keybindings.OpenTerminal != Defaults().Keybindings.OpenTerminal {
+		t.Fatalf("OpenTerminal key = %q, want %q", cfg.Keybindings.OpenTerminal, Defaults().Keybindings.OpenTerminal)
+	}
 	if cfg.Editor.Command != Defaults().Editor.Command {
 		t.Fatalf("Editor.Command = %q, want %q", cfg.Editor.Command, Defaults().Editor.Command)
 	}
 	if !reflect.DeepEqual(cfg.Editor.Args, Defaults().Editor.Args) {
 		t.Fatalf("Editor.Args = %#v, want %#v", cfg.Editor.Args, Defaults().Editor.Args)
+	}
+	if cfg.Terminal.Command != Defaults().Terminal.Command {
+		t.Fatalf("Terminal.Command = %q, want %q", cfg.Terminal.Command, Defaults().Terminal.Command)
+	}
+	if !reflect.DeepEqual(cfg.Terminal.Args, Defaults().Terminal.Args) {
+		t.Fatalf("Terminal.Args = %#v, want %#v", cfg.Terminal.Args, Defaults().Terminal.Args)
 	}
 	if !cfg.Git.ShowRemoteStatus {
 		t.Fatalf("Git.ShowRemoteStatus = false, want true")
@@ -51,7 +60,7 @@ func TestLoadMergesDefaults(t *testing.T) {
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	content := []byte("default_command: git fetch\neditor:\n  command: zed\n  args:\n    - .\nkeybindings:\n  open_editor: e\nui:\n  show_commit_hash: false\n")
+	content := []byte("default_command: git fetch\neditor:\n  command: zed\n  args:\n    - .\nterminal:\n  command: wezterm\n  args:\n    - start\n    - --cwd\n    - '{path}'\nkeybindings:\n  open_editor: e\n  open_terminal: x\nui:\n  show_commit_hash: false\n")
 	if err := os.WriteFile(path, content, 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -70,11 +79,20 @@ func TestLoadMergesDefaults(t *testing.T) {
 	if cfg.Keybindings.OpenEditor != "e" {
 		t.Fatalf("OpenEditor key = %q, want %q", cfg.Keybindings.OpenEditor, "e")
 	}
+	if cfg.Keybindings.OpenTerminal != "x" {
+		t.Fatalf("OpenTerminal key = %q, want %q", cfg.Keybindings.OpenTerminal, "x")
+	}
 	if cfg.Editor.Command != "zed" {
 		t.Fatalf("Editor.Command = %q, want %q", cfg.Editor.Command, "zed")
 	}
 	if !reflect.DeepEqual(cfg.Editor.Args, []string{"."}) {
 		t.Fatalf("Editor.Args = %#v, want %#v", cfg.Editor.Args, []string{"."})
+	}
+	if cfg.Terminal.Command != "wezterm" {
+		t.Fatalf("Terminal.Command = %q, want %q", cfg.Terminal.Command, "wezterm")
+	}
+	if !reflect.DeepEqual(cfg.Terminal.Args, []string{"start", "--cwd", "{path}"}) {
+		t.Fatalf("Terminal.Args = %#v, want %#v", cfg.Terminal.Args, []string{"start", "--cwd", "{path}"})
 	}
 	if cfg.Keybindings.Refresh != Defaults().Keybindings.Refresh {
 		t.Fatalf("Refresh key = %q, want %q", cfg.Keybindings.Refresh, Defaults().Keybindings.Refresh)

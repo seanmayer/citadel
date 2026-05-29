@@ -5,20 +5,23 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	DefaultCommand string       `yaml:"default_command"`
-	Keybindings    Keybindings  `yaml:"keybindings"`
-	Editor         EditorConfig `yaml:"editor"`
-	Git            GitConfig    `yaml:"git"`
-	UI             UIConfig     `yaml:"ui"`
+	DefaultCommand string         `yaml:"default_command"`
+	Keybindings    Keybindings    `yaml:"keybindings"`
+	Editor         EditorConfig   `yaml:"editor"`
+	Terminal       TerminalConfig `yaml:"terminal"`
+	Git            GitConfig      `yaml:"git"`
+	UI             UIConfig       `yaml:"ui"`
 }
 
 type Keybindings struct {
 	OpenEditor   string `yaml:"open_editor"`
+	OpenTerminal string `yaml:"open_terminal"`
 	Refresh      string `yaml:"refresh"`
 	FetchRefresh string `yaml:"fetch_refresh"`
 	Quit         string `yaml:"quit"`
@@ -26,6 +29,11 @@ type Keybindings struct {
 }
 
 type EditorConfig struct {
+	Command string   `yaml:"command"`
+	Args    []string `yaml:"args"`
+}
+
+type TerminalConfig struct {
 	Command string   `yaml:"command"`
 	Args    []string `yaml:"args"`
 }
@@ -49,6 +57,7 @@ func Defaults() Config {
 		DefaultCommand: "git status",
 		Keybindings: Keybindings{
 			OpenEditor:   "o",
+			OpenTerminal: "t",
 			Refresh:      "r",
 			FetchRefresh: "R",
 			Quit:         "q",
@@ -58,6 +67,7 @@ func Defaults() Config {
 			Command: "code",
 			Args:    []string{"."},
 		},
+		Terminal: defaultTerminalConfig(),
 		Git: GitConfig{
 			BaseBranch:       "origin/main",
 			FetchOnRefresh:   false,
@@ -70,6 +80,26 @@ func Defaults() Config {
 			ShowBranch:      true,
 			ShowDirtyStatus: true,
 		},
+	}
+}
+
+func defaultTerminalConfig() TerminalConfig {
+	switch runtime.GOOS {
+	case "darwin":
+		return TerminalConfig{
+			Command: "open",
+			Args:    []string{"-a", "Terminal", "{path}"},
+		}
+	case "windows":
+		return TerminalConfig{
+			Command: "wt",
+			Args:    []string{"-d", "{path}"},
+		}
+	default:
+		return TerminalConfig{
+			Command: "x-terminal-emulator",
+			Args:    []string{"--working-directory={path}"},
+		}
 	}
 }
 
@@ -115,6 +145,9 @@ func Load(path string) (Config, error) {
 	if cfg.Keybindings.OpenEditor == "" {
 		cfg.Keybindings.OpenEditor = Defaults().Keybindings.OpenEditor
 	}
+	if cfg.Keybindings.OpenTerminal == "" {
+		cfg.Keybindings.OpenTerminal = Defaults().Keybindings.OpenTerminal
+	}
 	if cfg.Keybindings.FetchRefresh == "" {
 		cfg.Keybindings.FetchRefresh = Defaults().Keybindings.FetchRefresh
 	}
@@ -129,6 +162,12 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Editor.Args == nil {
 		cfg.Editor.Args = append([]string(nil), Defaults().Editor.Args...)
+	}
+	if cfg.Terminal.Command == "" {
+		cfg.Terminal.Command = Defaults().Terminal.Command
+	}
+	if cfg.Terminal.Args == nil {
+		cfg.Terminal.Args = append([]string(nil), Defaults().Terminal.Args...)
 	}
 	if cfg.Git.BaseBranch == "" {
 		cfg.Git.BaseBranch = Defaults().Git.BaseBranch
