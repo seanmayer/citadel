@@ -16,7 +16,7 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "gwtui: %v\n", err)
+		fmt.Fprintf(os.Stderr, "citadel: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -35,7 +35,7 @@ func run() error {
 	gitService := git.NewService(nil)
 	repoRoot, err := gitService.DetectRepoRoot(context.Background(), cwd)
 	if err != nil {
-		return fmt.Errorf("gwtui requires running inside a Git repository: %w", err)
+		return fmt.Errorf("citadel requires running inside a Git repository: %w", err)
 	}
 
 	commandService := commands.NewService(gitService)

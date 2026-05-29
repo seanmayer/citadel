@@ -28,6 +28,29 @@ func TestRenderOutputShowsContinueCallToAction(t *testing.T) {
 	}
 }
 
+func TestRenderSplashShowsCitadelBranding(t *testing.T) {
+	t.Parallel()
+
+	renderer := NewRenderer(config.Defaults())
+	view := renderer.Render(ViewModel{
+		Mode:     ModeSplash,
+		Width:    100,
+		Height:   30,
+		RepoRoot: "/repo/project",
+	})
+
+	for _, snippet := range []string{
+		"citadel",
+		"minimal git worktree command center",
+		"loading worktrees",
+		"press any key to continue",
+	} {
+		if !strings.Contains(view, snippet) {
+			t.Fatalf("rendered splash missing %q:\n%s", snippet, view)
+		}
+	}
+}
+
 func TestRenderListShowsWorktreeActionList(t *testing.T) {
 	t.Parallel()
 
