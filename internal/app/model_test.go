@@ -13,10 +13,13 @@ import (
 )
 
 type stubGitService struct {
-	worktrees    []git.Worktree
-	deleteCalls  []deleteCall
-	deleteOutput string
-	deleteErr    error
+	worktrees             []git.Worktree
+	deleteCalls           []deleteCall
+	deleteOutput          string
+	deleteErr             error
+	openPullRequestCalls  []openPullRequestCall
+	openPullRequestOutput string
+	openPullRequestError  error
 }
 
 func (s *stubGitService) ListWorktrees(_ context.Context, _ string, _ string, _ git.RefreshOptions) ([]git.Worktree, error) {
@@ -41,6 +44,24 @@ func (s *stubGitService) DeleteWorktree(_ context.Context, repoRoot string, work
 	}
 
 	return s.deleteOutput, s.deleteErr
+}
+
+type openPullRequestCall struct {
+	worktreePath string
+	branch       string
+}
+
+func (s *stubGitService) OpenPullRequest(_ context.Context, worktreePath string, branch string) (string, error) {
+	s.openPullRequestCalls = append(s.openPullRequestCalls, openPullRequestCall{
+		worktreePath: worktreePath,
+		branch:       branch,
+	})
+
+	if s.openPullRequestOutput == "" {
+		return "(no output)", s.openPullRequestError
+	}
+
+	return s.openPullRequestOutput, s.openPullRequestError
 }
 
 type commandCall struct {
@@ -539,6 +560,82 @@ func TestOpenEditorRejectsBareWorktree(t *testing.T) {
 	}
 	if updated.errorMessage != "Cannot open a bare worktree in an editor." {
 		t.Fatalf("errorMessage = %q, want bare-worktree error", updated.errorMessage)
+	}
+}
+
+func TestOpenPullRequestRunsForSelectedBranchWorktree(t *testing.T) {
+	t.Parallel()
+
+	gitService := &stubGitService{openPullRequestOutput: "opened browser"}
+	model := New(config.Defaults(), gitService, &stubCommandService{}, &stubEditorService{}, "/repo")
+	model.worktrees = []git.Worktree{{
+		Path:   "/repo/feature",
+		Branch: "feature/demo",
+	}}
+
+	next, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	updated := next.(*Model)
+	if cmd == nil {
+		t.Fatal("open pull request command = nil, want command")
+	}
+	if updated.statusMessage != "Opening pull request in browser..." {
+		t.Fatalf("statusMessage = %q, want opening message", updated.statusMessage)
+	}
+
+	msg := cmd()
+	finished, ok := msg.(commandFinishedMsg)
+	if !ok {
+		t.Fatalf("message type = %T, want commandFinishedMsg", msg)
+	}
+	if finished.err != nil {
+		t.Fatalf("open pull request error = %v, want nil", finished.err)
+	}
+	if finished.result.Output != "opened browser" {
+		t.Fatalf("output = %q, want %q", finished.result.Output, "opened browser")
+	}
+	if len(gitService.openPullRequestCalls) != 1 {
+		t.Fatalf("OpenPullRequest() call count = %d, want 1", len(gitService.openPullRequestCalls))
+	}
+	if gitService.openPullRequestCalls[0].worktreePath != "/repo/feature" {
+		t.Fatalf("worktreePath = %q, want %q", gitService.openPullRequestCalls[0].worktreePath, "/repo/feature")
+	}
+	if gitService.openPullRequestCalls[0].branch != "feature/demo" {
+		t.Fatalf("branch = %q, want %q", gitService.openPullRequestCalls[0].branch, "feature/demo")
+	}
+
+	next, _ = updated.Update(finished)
+	updated = next.(*Model)
+	if updated.statusMessage != "Opened pull request in browser." {
+		t.Fatalf("statusMessage = %q, want %q", updated.statusMessage, "Opened pull request in browser.")
+	}
+	if updated.errorMessage != "" {
+		t.Fatalf("errorMessage = %q, want empty", updated.errorMessage)
+	}
+	if updated.state != ui.ModeOutput {
+		t.Fatalf("state = %q, want %q", updated.state, ui.ModeOutput)
+	}
+	if updated.lastCommand != "gh pr view feature/demo --web" {
+		t.Fatalf("lastCommand = %q, want %q", updated.lastCommand, "gh pr view feature/demo --web")
+	}
+}
+
+func TestOpenPullRequestRejectsDetachedWorktree(t *testing.T) {
+	t.Parallel()
+
+	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, &stubEditorService{}, "/repo")
+	model.worktrees = []git.Worktree{{
+		Path:       "/repo/detached",
+		Branch:     "detached",
+		IsDetached: true,
+	}}
+
+	next, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	updated := next.(*Model)
+	if cmd != nil {
+		t.Fatal("open pull request command != nil, want nil")
+	}
+	if updated.errorMessage != "Selected worktree does not have a named branch." {
+		t.Fatalf("errorMessage = %q, want detached-branch error", updated.errorMessage)
 	}
 }
 

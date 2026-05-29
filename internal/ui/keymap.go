@@ -9,20 +9,21 @@ import (
 )
 
 type KeyMap struct {
-	Up           key.Binding
-	Down         key.Binding
-	OpenEditor   key.Binding
-	StageAll     key.Binding
-	Commit       key.Binding
-	Create       key.Binding
-	Delete       key.Binding
-	Enter        key.Binding
-	Continue     key.Binding
-	Refresh      key.Binding
-	FetchRefresh key.Binding
-	Back         key.Binding
-	Help         key.Binding
-	Quit         key.Binding
+	Up              key.Binding
+	Down            key.Binding
+	OpenEditor      key.Binding
+	OpenPullRequest key.Binding
+	StageAll        key.Binding
+	Commit          key.Binding
+	Create          key.Binding
+	Delete          key.Binding
+	Enter           key.Binding
+	Continue        key.Binding
+	Refresh         key.Binding
+	FetchRefresh    key.Binding
+	Back            key.Binding
+	Help            key.Binding
+	Quit            key.Binding
 }
 
 func NewKeyMap(cfg config.Keybindings) KeyMap {
@@ -38,6 +39,10 @@ func NewKeyMap(cfg config.Keybindings) KeyMap {
 		OpenEditor: key.NewBinding(
 			key.WithKeys(cfg.OpenEditor),
 			key.WithHelp(cfg.OpenEditor, "open editor"),
+		),
+		OpenPullRequest: key.NewBinding(
+			key.WithKeys("p"),
+			key.WithHelp("p", "open PR"),
 		),
 		StageAll: key.NewBinding(
 			key.WithKeys("a"),
@@ -87,7 +92,7 @@ func NewKeyMap(cfg config.Keybindings) KeyMap {
 }
 
 func (k KeyMap) ShortHelp() string {
-	items := []key.Binding{k.Up, k.Down, k.OpenEditor, k.StageAll, k.Commit, k.Create, k.Delete, k.Enter, k.Refresh, k.FetchRefresh, k.Back, k.Help, k.Quit}
+	items := []key.Binding{k.Up, k.Down, k.OpenEditor, k.OpenPullRequest, k.StageAll, k.Commit, k.Create, k.Delete, k.Enter, k.Refresh, k.FetchRefresh, k.Back, k.Help, k.Quit}
 	return helpString(items)
 }
 

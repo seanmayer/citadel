@@ -217,6 +217,7 @@ func (r Renderer) renderHelp(vm ViewModel) string {
 		r.helpLine(r.keys.Up),
 		r.helpLine(r.keys.Down),
 		r.helpLine(r.keys.OpenEditor),
+		r.helpLine(r.keys.OpenPullRequest),
 		r.helpLine(r.keys.StageAll),
 		r.helpLine(r.keys.Commit),
 		r.helpLine(r.keys.Create),
@@ -260,6 +261,10 @@ func (r Renderer) renderActionList(vm ViewModel, worktree git.Worktree) string {
 	lines := []string{
 		r.styles.Label.Render("Actions"),
 		r.styles.Subtle.Render(fmt.Sprintf("Press %s to open terminal command mode.", r.keys.Enter.Help().Key)),
+	}
+
+	if worktree.HasNamedBranch() {
+		lines = append(lines, r.styles.Subtle.Render(fmt.Sprintf("Press %s to open the pull request for this branch, if one exists.", r.keys.OpenPullRequest.Help().Key)))
 	}
 
 	if worktree.IsBare {

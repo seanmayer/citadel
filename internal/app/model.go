@@ -20,6 +20,7 @@ import (
 type GitService interface {
 	ListWorktrees(ctx context.Context, repoRoot string, currentWorktreePath string, options git.RefreshOptions) ([]git.Worktree, error)
 	DeleteWorktree(ctx context.Context, repoRoot string, worktree git.Worktree, options git.DeleteOptions) (string, error)
+	OpenPullRequest(ctx context.Context, worktreePath string, branch string) (string, error)
 }
 
 type CommandService interface {
@@ -232,6 +233,19 @@ func (m *Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMessage = "Opening worktree in editor..."
 		m.errorMessage = ""
 		return m, m.openEditorCmd(worktree.Path)
+	case key.Matches(keyMsg, m.keys.OpenPullRequest):
+		worktree, ok := m.selectedWorktree()
+		if !ok {
+			return m, nil
+		}
+		if !worktree.HasNamedBranch() {
+			m.statusMessage = "Pull request was not opened."
+			m.errorMessage = "Selected worktree does not have a named branch."
+			return m, nil
+		}
+		m.statusMessage = "Opening pull request in browser..."
+		m.errorMessage = ""
+		return m, m.openPullRequestCmd(worktree.Path, worktree.Branch)
 	case key.Matches(keyMsg, m.keys.StageAll):
 		worktree, ok := m.selectedWorktree()
 		if !ok {
@@ -576,6 +590,34 @@ func (m *Model) openEditorCmd(worktreePath string) tea.Cmd {
 	}
 }
 
+func (m *Model) openPullRequestCmd(worktreePath string, branch string) tea.Cmd {
+	return func() tea.Msg {
+		commandLabel := pullRequestCommandLabel(branch)
+		if m.gitService == nil {
+			return commandFinishedMsg{
+				result: commands.Result{
+					Parsed: commands.ParsedCommand{Raw: commandLabel},
+					Output: "git service is not configured",
+				},
+				err: errors.New("git service is not configured"),
+			}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		output, err := m.gitService.OpenPullRequest(ctx, worktreePath, branch)
+		return commandFinishedMsg{
+			result: commands.Result{
+				Parsed: commands.ParsedCommand{Raw: commandLabel},
+				Output: output,
+			},
+			err:            err,
+			successMessage: "Opened pull request in browser.",
+		}
+	}
+}
+
 func (m *Model) resizeComponents() {
 	m.commandInput.SetWidth(m.commandInputWidth())
 	m.branchInput.SetWidth(m.commandInputWidth())
@@ -639,6 +681,15 @@ func (m *Model) editorCommandLabel(worktreePath string) string {
 	}
 
 	return strings.Join(parts, " ")
+}
+
+func pullRequestCommandLabel(branch string) string {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return "gh pr view --web"
+	}
+
+	return fmt.Sprintf("gh pr view %s --web", branch)
 }
 
 func (m *Model) selectedWorktree() (git.Worktree, bool) {
