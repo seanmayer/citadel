@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -14,13 +15,26 @@ import (
 
 type stubGitService struct {
 	worktrees    []git.Worktree
+	listCalls    []listCall
+	listErr      error
 	deleteCalls  []deleteCall
 	deleteOutput string
 	deleteErr    error
 }
 
-func (s *stubGitService) ListWorktrees(_ context.Context, _ string, _ string, _ git.RefreshOptions) ([]git.Worktree, error) {
-	return s.worktrees, nil
+type listCall struct {
+	repoRoot            string
+	currentWorktreePath string
+	options             git.RefreshOptions
+}
+
+func (s *stubGitService) ListWorktrees(_ context.Context, repoRoot string, currentWorktreePath string, options git.RefreshOptions) ([]git.Worktree, error) {
+	s.listCalls = append(s.listCalls, listCall{
+		repoRoot:            repoRoot,
+		currentWorktreePath: currentWorktreePath,
+		options:             options,
+	})
+	return s.worktrees, s.listErr
 }
 
 type deleteCall struct {
@@ -104,6 +118,87 @@ func TestSplashFinishedTransitionsToList(t *testing.T) {
 
 	if updated.state != ui.ModeList {
 		t.Fatalf("state = %q, want %q", updated.state, ui.ModeList)
+	}
+}
+
+func TestAutoRefreshTickReloadsWorktreesSilentlyInListMode(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Defaults()
+	cfg.Git.AutoRefreshInterval = config.Duration{Duration: 5 * time.Second}
+
+	gitService := &stubGitService{
+		worktrees: []git.Worktree{{
+			Path:   "/repo",
+			Branch: "main",
+		}},
+	}
+	model := New(cfg, gitService, &stubCommandService{}, &stubEditorService{}, "/repo")
+	model.state = ui.ModeList
+	model.statusMessage = "Watching worktrees."
+	model.autoRefreshToken = 1
+
+	next, cmd := model.Update(autoRefreshTickMsg{token: 1})
+	updated := next.(*Model)
+	if cmd == nil {
+		t.Fatal("auto refresh command = nil, want load command")
+	}
+	if updated.pendingWorktreeLoads != 1 {
+		t.Fatalf("pendingWorktreeLoads = %d, want 1", updated.pendingWorktreeLoads)
+	}
+
+	msg := cmd()
+	loaded, ok := msg.(worktreesLoadedMsg)
+	if !ok {
+		t.Fatalf("message type = %T, want worktreesLoadedMsg", msg)
+	}
+	if !loaded.silent {
+		t.Fatal("silent = false, want true")
+	}
+	if len(gitService.listCalls) != 1 {
+		t.Fatalf("ListWorktrees() call count = %d, want 1", len(gitService.listCalls))
+	}
+	if gitService.listCalls[0].options.Fetch {
+		t.Fatal("Fetch = true, want false")
+	}
+
+	next, rescheduleCmd := updated.Update(loaded)
+	updated = next.(*Model)
+	if updated.pendingWorktreeLoads != 0 {
+		t.Fatalf("pendingWorktreeLoads = %d, want 0", updated.pendingWorktreeLoads)
+	}
+	if updated.statusMessage != "Watching worktrees." {
+		t.Fatalf("statusMessage = %q, want %q", updated.statusMessage, "Watching worktrees.")
+	}
+	if len(updated.worktrees) != 1 || updated.worktrees[0].Branch != "main" {
+		t.Fatalf("worktrees = %#v, want reloaded main worktree", updated.worktrees)
+	}
+	if rescheduleCmd == nil {
+		t.Fatal("reschedule command = nil, want next auto-refresh timer")
+	}
+}
+
+func TestAutoRefreshTickSkipsReloadOutsideListMode(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Defaults()
+	cfg.Git.AutoRefreshInterval = config.Duration{Duration: 5 * time.Second}
+
+	gitService := &stubGitService{}
+	model := New(cfg, gitService, &stubCommandService{}, &stubEditorService{}, "/repo")
+	model.state = ui.ModeCommand
+	model.autoRefreshToken = 2
+
+	next, cmd := model.Update(autoRefreshTickMsg{token: 2})
+	updated := next.(*Model)
+	if cmd == nil {
+		t.Fatal("auto refresh timer = nil, want rescheduled timer")
+	}
+	if updated.pendingWorktreeLoads != 0 {
+		t.Fatalf("pendingWorktreeLoads = %d, want 0", updated.pendingWorktreeLoads)
+	}
+	if len(gitService.listCalls) != 0 {
+		t.Fatalf("ListWorktrees() call count = %d, want 0", len(gitService.listCalls))
 	}
 }
 
