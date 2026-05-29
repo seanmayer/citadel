@@ -9,6 +9,7 @@ import (
 
 type fakeRunner struct {
 	results map[string]fakeResult
+	calls   []string
 }
 
 type fakeResult struct {
@@ -29,6 +30,7 @@ func (f *fakeRunner) stub(dir string, name string, result fakeResult, args ...st
 }
 
 func (f *fakeRunner) Run(dir string, name string, args ...string) (stdout string, stderr string, exitCode int, err error) {
+	f.calls = append(f.calls, f.key(dir, name, args...))
 	result, ok := f.results[f.key(dir, name, args...)]
 	if !ok {
 		return "", "", -1, fmt.Errorf("unexpected command: dir=%q name=%q args=%q", dir, name, strings.Join(args, " "))

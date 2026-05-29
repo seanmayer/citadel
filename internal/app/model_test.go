@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -14,6 +15,8 @@ import (
 
 type stubGitService struct {
 	worktrees             []git.Worktree
+	listCalls             []listCall
+	listErr               error
 	deleteCalls           []deleteCall
 	deleteOutput          string
 	deleteErr             error
@@ -22,8 +25,19 @@ type stubGitService struct {
 	openPullRequestError  error
 }
 
-func (s *stubGitService) ListWorktrees(_ context.Context, _ string, _ string, _ git.RefreshOptions) ([]git.Worktree, error) {
-	return s.worktrees, nil
+type listCall struct {
+	repoRoot            string
+	currentWorktreePath string
+	options             git.RefreshOptions
+}
+
+func (s *stubGitService) ListWorktrees(_ context.Context, repoRoot string, currentWorktreePath string, options git.RefreshOptions) ([]git.Worktree, error) {
+	s.listCalls = append(s.listCalls, listCall{
+		repoRoot:            repoRoot,
+		currentWorktreePath: currentWorktreePath,
+		options:             options,
+	})
+	return s.worktrees, s.listErr
 }
 
 type deleteCall struct {
@@ -103,6 +117,110 @@ func (s *stubEditorService) Open(_ context.Context, worktreePath string) (string
 		return "(no output)", s.err
 	}
 	return s.output, s.err
+}
+
+func TestNewStartsInSplashMode(t *testing.T) {
+	t.Parallel()
+
+	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, &stubEditorService{}, "/repo")
+
+	if model.state != ui.ModeSplash {
+		t.Fatalf("state = %q, want %q", model.state, ui.ModeSplash)
+	}
+}
+
+func TestSplashFinishedTransitionsToList(t *testing.T) {
+	t.Parallel()
+
+	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, &stubEditorService{}, "/repo")
+
+	next, _ := model.Update(splashFinishedMsg{})
+	updated := next.(*Model)
+
+	if updated.state != ui.ModeList {
+		t.Fatalf("state = %q, want %q", updated.state, ui.ModeList)
+	}
+}
+
+func TestAutoRefreshTickReloadsWorktreesSilentlyInListMode(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Defaults()
+	cfg.Git.AutoRefreshInterval = config.Duration{Duration: 5 * time.Second}
+
+	gitService := &stubGitService{
+		worktrees: []git.Worktree{{
+			Path:   "/repo",
+			Branch: "main",
+		}},
+	}
+	model := New(cfg, gitService, &stubCommandService{}, &stubEditorService{}, "/repo")
+	model.state = ui.ModeList
+	model.statusMessage = "Watching worktrees."
+	model.autoRefreshToken = 1
+
+	next, cmd := model.Update(autoRefreshTickMsg{token: 1})
+	updated := next.(*Model)
+	if cmd == nil {
+		t.Fatal("auto refresh command = nil, want load command")
+	}
+	if updated.pendingWorktreeLoads != 1 {
+		t.Fatalf("pendingWorktreeLoads = %d, want 1", updated.pendingWorktreeLoads)
+	}
+
+	msg := cmd()
+	loaded, ok := msg.(worktreesLoadedMsg)
+	if !ok {
+		t.Fatalf("message type = %T, want worktreesLoadedMsg", msg)
+	}
+	if !loaded.silent {
+		t.Fatal("silent = false, want true")
+	}
+	if len(gitService.listCalls) != 1 {
+		t.Fatalf("ListWorktrees() call count = %d, want 1", len(gitService.listCalls))
+	}
+	if gitService.listCalls[0].options.Fetch {
+		t.Fatal("Fetch = true, want false")
+	}
+
+	next, rescheduleCmd := updated.Update(loaded)
+	updated = next.(*Model)
+	if updated.pendingWorktreeLoads != 0 {
+		t.Fatalf("pendingWorktreeLoads = %d, want 0", updated.pendingWorktreeLoads)
+	}
+	if updated.statusMessage != "Watching worktrees." {
+		t.Fatalf("statusMessage = %q, want %q", updated.statusMessage, "Watching worktrees.")
+	}
+	if len(updated.worktrees) != 1 || updated.worktrees[0].Branch != "main" {
+		t.Fatalf("worktrees = %#v, want reloaded main worktree", updated.worktrees)
+	}
+	if rescheduleCmd == nil {
+		t.Fatal("reschedule command = nil, want next auto-refresh timer")
+	}
+}
+
+func TestAutoRefreshTickSkipsReloadOutsideListMode(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Defaults()
+	cfg.Git.AutoRefreshInterval = config.Duration{Duration: 5 * time.Second}
+
+	gitService := &stubGitService{}
+	model := New(cfg, gitService, &stubCommandService{}, &stubEditorService{}, "/repo")
+	model.state = ui.ModeCommand
+	model.autoRefreshToken = 2
+
+	next, cmd := model.Update(autoRefreshTickMsg{token: 2})
+	updated := next.(*Model)
+	if cmd == nil {
+		t.Fatal("auto refresh timer = nil, want rescheduled timer")
+	}
+	if updated.pendingWorktreeLoads != 0 {
+		t.Fatalf("pendingWorktreeLoads = %d, want 0", updated.pendingWorktreeLoads)
+	}
+	if len(gitService.listCalls) != 0 {
+		t.Fatalf("ListWorktrees() call count = %d, want 0", len(gitService.listCalls))
+	}
 }
 
 func TestCreateBranchKeyEntersCreateModeForBranchlessWorktree(t *testing.T) {
@@ -262,6 +380,53 @@ func TestStageAllRunsGitAddAndRefreshes(t *testing.T) {
 	}
 	if updated.statusMessage != "Staged all changes." {
 		t.Fatalf("statusMessage = %q, want %q", updated.statusMessage, "Staged all changes.")
+	}
+	if refreshCmd == nil {
+		t.Fatal("refresh command = nil, want reload command")
+	}
+}
+
+func TestHotPushRunsBuiltInWorkflowAndRefreshes(t *testing.T) {
+	t.Parallel()
+
+	gitService := &stubGitService{
+		worktrees: []git.Worktree{{
+			Path:   "/repo/feature",
+			Branch: "feature/demo",
+		}},
+	}
+	commandService := &stubCommandService{}
+	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, "/repo")
+	model.worktrees = gitService.worktrees
+
+	next, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	updated := next.(*Model)
+	if cmd == nil {
+		t.Fatal("hot push command = nil, want command")
+	}
+	if updated.statusMessage != "Running hot push..." {
+		t.Fatalf("statusMessage = %q, want hot push message", updated.statusMessage)
+	}
+
+	msg := cmd()
+	finished, ok := msg.(commandFinishedMsg)
+	if !ok {
+		t.Fatalf("message type = %T, want commandFinishedMsg", msg)
+	}
+	if len(commandService.calls) != 1 {
+		t.Fatalf("Execute() call count = %d, want 1", len(commandService.calls))
+	}
+	if commandService.calls[0].raw != "hot push" {
+		t.Fatalf("raw command = %q, want %q", commandService.calls[0].raw, "hot push")
+	}
+
+	next, refreshCmd := updated.Update(finished)
+	updated = next.(*Model)
+	if updated.state != ui.ModeOutput {
+		t.Fatalf("state = %q, want %q", updated.state, ui.ModeOutput)
+	}
+	if updated.statusMessage != "Hot push completed." {
+		t.Fatalf("statusMessage = %q, want %q", updated.statusMessage, "Hot push completed.")
 	}
 	if refreshCmd == nil {
 		t.Fatal("refresh command = nil, want reload command")
@@ -573,7 +738,7 @@ func TestOpenPullRequestRunsForSelectedBranchWorktree(t *testing.T) {
 		Branch: "feature/demo",
 	}}
 
-	next, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	next, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
 	updated := next.(*Model)
 	if cmd == nil {
 		t.Fatal("open pull request command = nil, want command")
@@ -629,7 +794,7 @@ func TestOpenPullRequestRejectsDetachedWorktree(t *testing.T) {
 		IsDetached: true,
 	}}
 
-	next, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	next, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
 	updated := next.(*Model)
 	if cmd != nil {
 		t.Fatal("open pull request command != nil, want nil")
