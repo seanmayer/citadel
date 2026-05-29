@@ -16,6 +16,7 @@ import (
 type Mode string
 
 const (
+	ModeSplash  Mode = "splash"
 	ModeList    Mode = "list"
 	ModeCommand Mode = "command"
 	ModeCreate  Mode = "create-branch"
@@ -57,6 +58,8 @@ func NewRenderer(cfg config.Config) Renderer {
 
 func (r Renderer) Render(vm ViewModel) string {
 	switch vm.Mode {
+	case ModeSplash:
+		return r.styles.Root.Render(r.renderSplash(vm))
 	case ModeOutput:
 		return r.styles.Root.Render(r.renderOutput(vm))
 	case ModeHelp:
@@ -67,10 +70,34 @@ func (r Renderer) Render(vm ViewModel) string {
 }
 
 func (r Renderer) renderMain(vm ViewModel) string {
-	header := r.styles.Header.Render("gwtui") + "\n" + r.styles.Subtle.Render(vm.RepoRoot)
+	header := r.styles.Header.Render("citadel") + "\n" + r.styles.Subtle.Render(vm.RepoRoot)
 	panes := lipgloss.JoinHorizontal(lipgloss.Top, r.renderListPane(vm), r.renderDetailPane(vm))
 	footer := r.renderFooter(vm)
 	return lipgloss.JoinVertical(lipgloss.Left, header, panes, footer)
+}
+
+func (r Renderer) renderSplash(vm ViewModel) string {
+	width := max(vm.Width-4, 60)
+	height := max(vm.Height-2, 16)
+
+	lines := []string{
+		r.styles.SplashMark.Render("citadel"),
+		r.styles.SplashTag.Render("minimal git worktree command center"),
+	}
+
+	if vm.RepoRoot != "" {
+		lines = append(lines, "", r.styles.Subtle.Render(compactPath(vm.RepoRoot)))
+	}
+
+	status := r.styles.Subtle.Render("loading worktrees")
+	if vm.ErrorMessage != "" {
+		status = r.styles.Error.Render(vm.ErrorMessage)
+	}
+
+	lines = append(lines, "", status, r.styles.Footer.Render("press any key to continue"))
+
+	content := r.styles.SplashBox.Render(strings.Join(lines, "\n"))
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
 }
 
 func (r Renderer) renderListPane(vm ViewModel) string {
@@ -172,7 +199,7 @@ func (r Renderer) renderDetailPane(vm ViewModel) string {
 	if vm.Mode == ModeCommand {
 		commandPanel := r.styles.CommandBox.Render(
 			r.styles.Label.Render("Command Mode") + "\n" +
-				r.styles.Subtle.Render("Run a git command in the selected worktree.") + "\n\n" +
+				r.styles.Subtle.Render("Run a git command or the built-in hot push workflow in the selected worktree.") + "\n\n" +
 				vm.InputView,
 		)
 		content = content + "\n\n" + commandPanel
@@ -218,6 +245,7 @@ func (r Renderer) renderHelp(vm ViewModel) string {
 		r.helpLine(r.keys.Down),
 		r.helpLine(r.keys.OpenEditor),
 		r.helpLine(r.keys.StageAll),
+		r.helpLine(r.keys.HotPush),
 		r.helpLine(r.keys.Commit),
 		r.helpLine(r.keys.Create),
 		r.helpLine(r.keys.Delete),
@@ -270,6 +298,7 @@ func (r Renderer) renderActionList(vm ViewModel, worktree git.Worktree) string {
 	lines = append(lines,
 		r.styles.Subtle.Render(fmt.Sprintf("Press %s to open this worktree in the editor.", r.keys.OpenEditor.Help().Key)),
 		r.styles.Subtle.Render(fmt.Sprintf("Press %s to stage all files with git add .", r.keys.StageAll.Help().Key)),
+		r.styles.Subtle.Render(fmt.Sprintf("Press %s to fetch, pull, add, commit, and push with hot push.", r.keys.HotPush.Help().Key)),
 		r.styles.Subtle.Render(fmt.Sprintf("Press %s to commit files with a message.", r.keys.Commit.Help().Key)),
 	)
 
@@ -279,7 +308,7 @@ func (r Renderer) renderActionList(vm ViewModel, worktree git.Worktree) string {
 
 	switch {
 	case worktree.IsCurrent:
-		lines = append(lines, r.styles.Subtle.Render("Current worktree cannot be deleted while gwtui is running in it."))
+		lines = append(lines, r.styles.Subtle.Render("Current worktree cannot be deleted while citadel is running in it."))
 	default:
 		lines = append(lines, r.styles.Subtle.Render(fmt.Sprintf("Press %s to delete this worktree.", r.keys.Delete.Help().Key)))
 	}

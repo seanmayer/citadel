@@ -15,6 +15,7 @@
 - Lets you delete a worktree and its local branch with a confirmation prompt
 - Opens a command mode to run raw Git commands like `git status`, `git fetch`, or `git log --oneline -5`
 - Stages all files in the selected worktree with `git add .`
+- Runs a built-in `hot push` workflow that fetches, pulls, stages, commits with `hot push`, and pushes, retrying on a new remote branch if the original push is rejected for being behind remote
 - Opens a commit message prompt and runs `git commit -m "..."` in the selected worktree
 - Displays command output directly inside the TUI
 - Optionally auto-refreshes the worktree list and status on a configurable interval
@@ -45,6 +46,7 @@ gwtui
 - `down` / `j`: move selection down
 - `o`: open the selected worktree in the configured editor
 - `a`: stage all files in the selected worktree with `git add .`
+- `p`: run the built-in `hot push` workflow in the selected worktree
 - `c`: open commit mode and write the commit message for `git commit -m "..."`
 - `b`: create a branch for the selected detached or branchless worktree
 - `d`: delete the selected worktree and confirm with `y`
@@ -55,6 +57,8 @@ gwtui
 - `esc`: leave command mode or output view
 - `?`: show help
 - `q` / `ctrl+c`: quit
+
+In command mode, you can also run `hot push` or `git hot push` as a built-in workflow instead of a raw Git subcommand.
 
 ## Status Badges
 

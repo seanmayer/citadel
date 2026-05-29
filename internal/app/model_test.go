@@ -98,6 +98,29 @@ func (s *stubEditorService) Open(_ context.Context, worktreePath string) (string
 	return s.output, s.err
 }
 
+func TestNewStartsInSplashMode(t *testing.T) {
+	t.Parallel()
+
+	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, &stubEditorService{}, "/repo")
+
+	if model.state != ui.ModeSplash {
+		t.Fatalf("state = %q, want %q", model.state, ui.ModeSplash)
+	}
+}
+
+func TestSplashFinishedTransitionsToList(t *testing.T) {
+	t.Parallel()
+
+	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, &stubEditorService{}, "/repo")
+
+	next, _ := model.Update(splashFinishedMsg{})
+	updated := next.(*Model)
+
+	if updated.state != ui.ModeList {
+		t.Fatalf("state = %q, want %q", updated.state, ui.ModeList)
+	}
+}
+
 func TestAutoRefreshTickReloadsWorktreesSilentlyInListMode(t *testing.T) {
 	t.Parallel()
 
@@ -111,6 +134,7 @@ func TestAutoRefreshTickReloadsWorktreesSilentlyInListMode(t *testing.T) {
 		}},
 	}
 	model := New(cfg, gitService, &stubCommandService{}, &stubEditorService{}, "/repo")
+	model.state = ui.ModeList
 	model.statusMessage = "Watching worktrees."
 	model.autoRefreshToken = 1
 
@@ -335,6 +359,53 @@ func TestStageAllRunsGitAddAndRefreshes(t *testing.T) {
 	}
 	if updated.statusMessage != "Staged all changes." {
 		t.Fatalf("statusMessage = %q, want %q", updated.statusMessage, "Staged all changes.")
+	}
+	if refreshCmd == nil {
+		t.Fatal("refresh command = nil, want reload command")
+	}
+}
+
+func TestHotPushRunsBuiltInWorkflowAndRefreshes(t *testing.T) {
+	t.Parallel()
+
+	gitService := &stubGitService{
+		worktrees: []git.Worktree{{
+			Path:   "/repo/feature",
+			Branch: "feature/demo",
+		}},
+	}
+	commandService := &stubCommandService{}
+	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, "/repo")
+	model.worktrees = gitService.worktrees
+
+	next, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	updated := next.(*Model)
+	if cmd == nil {
+		t.Fatal("hot push command = nil, want command")
+	}
+	if updated.statusMessage != "Running hot push..." {
+		t.Fatalf("statusMessage = %q, want hot push message", updated.statusMessage)
+	}
+
+	msg := cmd()
+	finished, ok := msg.(commandFinishedMsg)
+	if !ok {
+		t.Fatalf("message type = %T, want commandFinishedMsg", msg)
+	}
+	if len(commandService.calls) != 1 {
+		t.Fatalf("Execute() call count = %d, want 1", len(commandService.calls))
+	}
+	if commandService.calls[0].raw != "hot push" {
+		t.Fatalf("raw command = %q, want %q", commandService.calls[0].raw, "hot push")
+	}
+
+	next, refreshCmd := updated.Update(finished)
+	updated = next.(*Model)
+	if updated.state != ui.ModeOutput {
+		t.Fatalf("state = %q, want %q", updated.state, ui.ModeOutput)
+	}
+	if updated.statusMessage != "Hot push completed." {
+		t.Fatalf("statusMessage = %q, want %q", updated.statusMessage, "Hot push completed.")
 	}
 	if refreshCmd == nil {
 		t.Fatal("refresh command = nil, want reload command")

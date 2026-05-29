@@ -36,6 +36,8 @@ type worktreesLoadedMsg struct {
 	silent    bool
 }
 
+type splashFinishedMsg struct{}
+
 type commandFinishedMsg struct {
 	result         commands.Result
 	err            error
@@ -46,6 +48,8 @@ type commandFinishedMsg struct {
 type autoRefreshTickMsg struct {
 	token int
 }
+
+const startupSplashDuration = 1200 * time.Millisecond
 
 type Model struct {
 	config               config.Config
@@ -85,7 +89,7 @@ func New(cfg config.Config, gitService GitService, commandService CommandService
 		editorService:       editorService,
 		repoRoot:            currentWorktreePath,
 		currentWorktreePath: currentWorktreePath,
-		state:               ui.ModeList,
+		state:               ui.ModeSplash,
 		renderer:            ui.NewRenderer(cfg),
 		keys:                keys,
 		commandInput:        commands.NewInputModel(cfg.DefaultCommand),
@@ -98,6 +102,7 @@ func New(cfg config.Config, gitService GitService, commandService CommandService
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.beginWorktreeLoad(false, false),
+		m.splashTimerCmd(),
 		m.scheduleAutoRefreshCmd(),
 	)
 }
@@ -126,8 +131,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selected = len(m.worktrees) - 1
 		}
 		m.ensureSelectionVisible()
-		if !msg.silent && m.state != ui.ModeOutput {
-			m.statusMessage = fmt.Sprintf("Loaded %d worktree(s)", len(m.worktrees))
+		if m.state != ui.ModeOutput && m.state != ui.ModeSplash {
+			if !msg.silent {
+				m.statusMessage = fmt.Sprintf("Loaded %d worktree(s)", len(m.worktrees))
+			}
 		}
 		m.errorMessage = ""
 		return m, m.scheduleAutoRefreshCmd()
@@ -139,6 +146,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.scheduleAutoRefreshCmd()
 		}
 		return m, m.beginWorktreeLoad(false, true)
+	case splashFinishedMsg:
+		if m.state == ui.ModeSplash {
+			m.state = ui.ModeList
+		}
+		return m, nil
 	case commandFinishedMsg:
 		var validationErr *commands.ValidationError
 		if errors.As(msg.err, &validationErr) {
@@ -167,6 +179,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch m.state {
+	case ui.ModeSplash:
+		return m.updateSplash(msg)
 	case ui.ModeCommand:
 		return m.updateCommand(msg)
 	case ui.ModeCreate:
@@ -182,6 +196,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	default:
 		return m.updateList(msg)
 	}
+}
+
+func (m *Model) updateSplash(msg tea.Msg) (tea.Model, tea.Cmd) {
+	keyMsg, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+
+	if keyMsg.Type == tea.KeyCtrlC || key.Matches(keyMsg, m.keys.Quit) {
+		return m, tea.Quit
+	}
+
+	m.state = ui.ModeList
+	return m.updateList(msg)
 }
 
 func (m *Model) View() string {
@@ -264,6 +292,19 @@ func (m *Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMessage = "Staging all changes..."
 		m.errorMessage = ""
 		return m, m.executeCommandCmd(worktree.Path, "git add .", true, "Staged all changes.")
+	case key.Matches(keyMsg, m.keys.HotPush):
+		worktree, ok := m.selectedWorktree()
+		if !ok {
+			return m, nil
+		}
+		if worktree.IsBare {
+			m.statusMessage = "Hot push was not run."
+			m.errorMessage = "Cannot run hot push in a bare worktree."
+			return m, nil
+		}
+		m.statusMessage = "Running hot push..."
+		m.errorMessage = ""
+		return m, m.executeCommandCmd(worktree.Path, "hot push", true, "Hot push completed.")
 	case key.Matches(keyMsg, m.keys.Commit):
 		worktree, ok := m.selectedWorktree()
 		if !ok {
@@ -358,9 +399,16 @@ func (m *Model) updateCommand(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			raw := m.commandInput.ResolvedValue()
+			refresh := false
+			successMessage := ""
 			m.statusMessage = "Running command..."
+			if commands.IsHotPush(raw) {
+				m.statusMessage = "Running hot push..."
+				refresh = true
+				successMessage = "Hot push completed."
+			}
 			m.errorMessage = ""
-			return m, m.executeCommandCmd(worktree.Path, raw, false, "")
+			return m, m.executeCommandCmd(worktree.Path, raw, refresh, successMessage)
 		}
 	}
 
@@ -561,6 +609,12 @@ func (m *Model) scheduleAutoRefreshCmd() tea.Cmd {
 
 func (m *Model) shouldAutoRefresh() bool {
 	return m.state == ui.ModeList
+}
+
+func (m *Model) splashTimerCmd() tea.Cmd {
+	return tea.Tick(startupSplashDuration, func(time.Time) tea.Msg {
+		return splashFinishedMsg{}
+	})
 }
 
 func (m *Model) executeCommandCmd(worktreePath string, raw string, refresh bool, successMessage string) tea.Cmd {
