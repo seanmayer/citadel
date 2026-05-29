@@ -31,6 +31,10 @@ type EditorService interface {
 	Open(ctx context.Context, worktreePath string) (string, error)
 }
 
+type TerminalService interface {
+	Open(ctx context.Context, worktreePath string) (string, error)
+}
+
 type worktreesLoadedMsg struct {
 	worktrees []git.Worktree
 	err       error
@@ -57,6 +61,7 @@ type Model struct {
 	gitService           GitService
 	commandService       CommandService
 	editorService        EditorService
+	terminalService      TerminalService
 	repoRoot             string
 	currentWorktreePath  string
 	worktrees            []git.Worktree
@@ -81,13 +86,14 @@ type Model struct {
 	pendingWorktreeLoads int
 }
 
-func New(cfg config.Config, gitService GitService, commandService CommandService, editorService EditorService, currentWorktreePath string) *Model {
+func New(cfg config.Config, gitService GitService, commandService CommandService, editorService EditorService, terminalService TerminalService, currentWorktreePath string) *Model {
 	keys := ui.NewKeyMap(cfg.Keybindings)
 	return &Model{
 		config:              cfg,
 		gitService:          gitService,
 		commandService:      commandService,
 		editorService:       editorService,
+		terminalService:     terminalService,
 		repoRoot:            currentWorktreePath,
 		currentWorktreePath: currentWorktreePath,
 		state:               ui.ModeSplash,
@@ -280,6 +286,14 @@ func (m *Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMessage = "Opening worktree in editor..."
 		m.errorMessage = ""
 		return m, m.openEditorCmd(worktree.Path)
+	case key.Matches(keyMsg, m.keys.OpenTerminal):
+		worktree, ok := m.selectedWorktree()
+		if !ok {
+			return m, nil
+		}
+		m.statusMessage = "Opening worktree in terminal..."
+		m.errorMessage = ""
+		return m, m.openTerminalCmd(worktree.Path)
 	case key.Matches(keyMsg, m.keys.OpenPullRequest):
 		worktree, ok := m.selectedWorktree()
 		if !ok {
@@ -692,6 +706,34 @@ func (m *Model) openEditorCmd(worktreePath string) tea.Cmd {
 	}
 }
 
+func (m *Model) openTerminalCmd(worktreePath string) tea.Cmd {
+	return func() tea.Msg {
+		commandLabel := m.terminalCommandLabel(worktreePath)
+		if m.terminalService == nil {
+			return commandFinishedMsg{
+				result: commands.Result{
+					Parsed: commands.ParsedCommand{Raw: commandLabel},
+					Output: "terminal service is not configured",
+				},
+				err: errors.New("terminal service is not configured"),
+			}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		output, err := m.terminalService.Open(ctx, worktreePath)
+		return commandFinishedMsg{
+			result: commands.Result{
+				Parsed: commands.ParsedCommand{Raw: commandLabel},
+				Output: output,
+			},
+			err:            err,
+			successMessage: "Opened worktree in terminal.",
+		}
+	}
+}
+
 func (m *Model) openPullRequestCmd(worktreePath string, branch string) tea.Cmd {
 	return func() tea.Msg {
 		commandLabel := pullRequestCommandLabel(branch)
@@ -779,6 +821,20 @@ func (m *Model) editorCommandLabel(worktreePath string) string {
 
 	parts := []string{command}
 	for _, arg := range m.config.Editor.Args {
+		parts = append(parts, strings.ReplaceAll(arg, "{path}", worktreePath))
+	}
+
+	return strings.Join(parts, " ")
+}
+
+func (m *Model) terminalCommandLabel(worktreePath string) string {
+	command := strings.TrimSpace(m.config.Terminal.Command)
+	if command == "" {
+		command = "terminal"
+	}
+
+	parts := []string{command}
+	for _, arg := range m.config.Terminal.Args {
 		parts = append(parts, strings.ReplaceAll(arg, "{path}", worktreePath))
 	}
 

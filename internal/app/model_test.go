@@ -119,10 +119,24 @@ func (s *stubEditorService) Open(_ context.Context, worktreePath string) (string
 	return s.output, s.err
 }
 
+type stubTerminalService struct {
+	paths  []string
+	output string
+	err    error
+}
+
+func (s *stubTerminalService) Open(_ context.Context, worktreePath string) (string, error) {
+	s.paths = append(s.paths, worktreePath)
+	if s.output == "" {
+		return "(no output)", s.err
+	}
+	return s.output, s.err
+}
+
 func TestNewStartsInSplashMode(t *testing.T) {
 	t.Parallel()
 
-	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, &stubEditorService{}, "/repo")
+	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, &stubEditorService{}, &stubTerminalService{}, "/repo")
 
 	if model.state != ui.ModeSplash {
 		t.Fatalf("state = %q, want %q", model.state, ui.ModeSplash)
@@ -132,7 +146,7 @@ func TestNewStartsInSplashMode(t *testing.T) {
 func TestSplashFinishedTransitionsToList(t *testing.T) {
 	t.Parallel()
 
-	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, &stubEditorService{}, "/repo")
+	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, &stubEditorService{}, &stubTerminalService{}, "/repo")
 
 	next, _ := model.Update(splashFinishedMsg{})
 	updated := next.(*Model)
@@ -154,7 +168,7 @@ func TestAutoRefreshTickReloadsWorktreesSilentlyInListMode(t *testing.T) {
 			Branch: "main",
 		}},
 	}
-	model := New(cfg, gitService, &stubCommandService{}, &stubEditorService{}, "/repo")
+	model := New(cfg, gitService, &stubCommandService{}, &stubEditorService{}, &stubTerminalService{}, "/repo")
 	model.state = ui.ModeList
 	model.statusMessage = "Watching worktrees."
 	model.autoRefreshToken = 1
@@ -206,7 +220,7 @@ func TestAutoRefreshTickSkipsReloadOutsideListMode(t *testing.T) {
 	cfg.Git.AutoRefreshInterval = config.Duration{Duration: 5 * time.Second}
 
 	gitService := &stubGitService{}
-	model := New(cfg, gitService, &stubCommandService{}, &stubEditorService{}, "/repo")
+	model := New(cfg, gitService, &stubCommandService{}, &stubEditorService{}, &stubTerminalService{}, "/repo")
 	model.state = ui.ModeCommand
 	model.autoRefreshToken = 2
 
@@ -228,7 +242,7 @@ func TestCreateBranchKeyEntersCreateModeForBranchlessWorktree(t *testing.T) {
 
 	gitService := &stubGitService{}
 	commandService := &stubCommandService{}
-	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, "/repo")
+	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, &stubTerminalService{}, "/repo")
 	model.width = 120
 	model.height = 40
 	model.worktrees = []git.Worktree{{
@@ -253,7 +267,7 @@ func TestCreateBranchKeyRejectsWorktreeWithExistingBranch(t *testing.T) {
 
 	gitService := &stubGitService{}
 	commandService := &stubCommandService{}
-	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, "/repo")
+	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, &stubTerminalService{}, "/repo")
 	model.worktrees = []git.Worktree{{
 		Path:   "/repo/main",
 		Branch: "main",
@@ -281,7 +295,7 @@ func TestCreateBranchModeRunsGitSwitchCreateAndRefreshes(t *testing.T) {
 		}},
 	}
 	commandService := &stubCommandService{}
-	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, "/repo")
+	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, &stubTerminalService{}, "/repo")
 	model.width = 120
 	model.height = 40
 	model.worktrees = gitService.worktrees
@@ -349,7 +363,7 @@ func TestStageAllRunsGitAddAndRefreshes(t *testing.T) {
 		}},
 	}
 	commandService := &stubCommandService{}
-	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, "/repo")
+	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, &stubTerminalService{}, "/repo")
 	model.worktrees = gitService.worktrees
 
 	next, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
@@ -396,7 +410,7 @@ func TestHotPushRunsBuiltInWorkflowAndRefreshes(t *testing.T) {
 		}},
 	}
 	commandService := &stubCommandService{}
-	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, "/repo")
+	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, &stubTerminalService{}, "/repo")
 	model.worktrees = gitService.worktrees
 
 	next, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
@@ -436,7 +450,7 @@ func TestHotPushRunsBuiltInWorkflowAndRefreshes(t *testing.T) {
 func TestCommitKeyEntersCommitMode(t *testing.T) {
 	t.Parallel()
 
-	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, &stubEditorService{}, "/repo")
+	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, &stubEditorService{}, &stubTerminalService{}, "/repo")
 	model.width = 120
 	model.height = 40
 	model.worktrees = []git.Worktree{{
@@ -465,7 +479,7 @@ func TestCommitModeRunsGitCommitAndRefreshes(t *testing.T) {
 		}},
 	}
 	commandService := &stubCommandService{}
-	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, "/repo")
+	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, &stubTerminalService{}, "/repo")
 	model.width = 120
 	model.height = 40
 	model.worktrees = gitService.worktrees
@@ -508,7 +522,7 @@ func TestDeleteKeyEntersDeleteModeForSelectableWorktree(t *testing.T) {
 
 	gitService := &stubGitService{}
 	commandService := &stubCommandService{}
-	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, "/repo")
+	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, &stubTerminalService{}, "/repo")
 	model.worktrees = []git.Worktree{{
 		Path:       "/repo/detached",
 		Branch:     "detached",
@@ -531,7 +545,7 @@ func TestDeleteKeyRejectsCurrentWorktree(t *testing.T) {
 
 	gitService := &stubGitService{}
 	commandService := &stubCommandService{}
-	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, "/repo")
+	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, &stubTerminalService{}, "/repo")
 	model.worktrees = []git.Worktree{{
 		Path:      "/repo",
 		Branch:    "main",
@@ -560,7 +574,7 @@ func TestDeleteModeRunsWorktreeDeletionAndRefreshes(t *testing.T) {
 		}},
 	}
 	commandService := &stubCommandService{}
-	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, "/repo")
+	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, &stubTerminalService{}, "/repo")
 	model.worktrees = gitService.worktrees
 	model.state = ui.ModeDelete
 	model.deleteTarget = gitService.worktrees[0]
@@ -635,7 +649,7 @@ func TestDeleteModeForcesBranchDeletionWhenMergeStatusIsUnknown(t *testing.T) {
 		}},
 	}
 	commandService := &stubCommandService{}
-	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, "/repo")
+	model := New(config.Defaults(), gitService, commandService, &stubEditorService{}, &stubTerminalService{}, "/repo")
 	model.worktrees = gitService.worktrees
 
 	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
@@ -662,7 +676,7 @@ func TestOpenEditorRunsForSelectedWorktree(t *testing.T) {
 	t.Parallel()
 
 	editorService := &stubEditorService{output: "editor launched"}
-	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, editorService, "/repo")
+	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, editorService, &stubTerminalService{}, "/repo")
 	model.worktrees = []git.Worktree{{
 		Path:   "/repo/feature",
 		Branch: "feature/demo",
@@ -711,7 +725,7 @@ func TestOpenEditorRunsForSelectedWorktree(t *testing.T) {
 func TestOpenEditorRejectsBareWorktree(t *testing.T) {
 	t.Parallel()
 
-	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, &stubEditorService{}, "/repo")
+	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, &stubEditorService{}, &stubTerminalService{}, "/repo")
 	model.worktrees = []git.Worktree{{
 		Path:   "/repo.git",
 		Branch: "main",
@@ -728,11 +742,65 @@ func TestOpenEditorRejectsBareWorktree(t *testing.T) {
 	}
 }
 
+func TestOpenTerminalRunsForSelectedWorktree(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Defaults()
+	cfg.Terminal.Command = "wezterm"
+	cfg.Terminal.Args = []string{"start", "--cwd", "{path}"}
+
+	terminalService := &stubTerminalService{output: "terminal launched"}
+	model := New(cfg, &stubGitService{}, &stubCommandService{}, &stubEditorService{}, terminalService, "/repo")
+	model.worktrees = []git.Worktree{{
+		Path:   "/repo/feature",
+		Branch: "feature/demo",
+	}}
+
+	next, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	updated := next.(*Model)
+	if cmd == nil {
+		t.Fatal("open terminal command = nil, want command")
+	}
+	if updated.statusMessage != "Opening worktree in terminal..." {
+		t.Fatalf("statusMessage = %q, want opening message", updated.statusMessage)
+	}
+
+	msg := cmd()
+	finished, ok := msg.(commandFinishedMsg)
+	if !ok {
+		t.Fatalf("message type = %T, want commandFinishedMsg", msg)
+	}
+	if finished.err != nil {
+		t.Fatalf("terminal open error = %v, want nil", finished.err)
+	}
+	if finished.result.Output != "terminal launched" {
+		t.Fatalf("output = %q, want %q", finished.result.Output, "terminal launched")
+	}
+	if len(terminalService.paths) != 1 || terminalService.paths[0] != "/repo/feature" {
+		t.Fatalf("opened paths = %#v, want /repo/feature", terminalService.paths)
+	}
+
+	next, _ = updated.Update(finished)
+	updated = next.(*Model)
+	if updated.statusMessage != "Opened worktree in terminal." {
+		t.Fatalf("statusMessage = %q, want success message", updated.statusMessage)
+	}
+	if updated.errorMessage != "" {
+		t.Fatalf("errorMessage = %q, want empty", updated.errorMessage)
+	}
+	if updated.state != ui.ModeOutput {
+		t.Fatalf("state = %q, want %q", updated.state, ui.ModeOutput)
+	}
+	if updated.lastCommand != "wezterm start --cwd /repo/feature" {
+		t.Fatalf("lastCommand = %q, want %q", updated.lastCommand, "wezterm start --cwd /repo/feature")
+	}
+}
+
 func TestOpenPullRequestRunsForSelectedBranchWorktree(t *testing.T) {
 	t.Parallel()
 
 	gitService := &stubGitService{openPullRequestOutput: "opened browser"}
-	model := New(config.Defaults(), gitService, &stubCommandService{}, &stubEditorService{}, "/repo")
+	model := New(config.Defaults(), gitService, &stubCommandService{}, &stubEditorService{}, &stubTerminalService{}, "/repo")
 	model.worktrees = []git.Worktree{{
 		Path:   "/repo/feature",
 		Branch: "feature/demo",
@@ -787,7 +855,7 @@ func TestOpenPullRequestRunsForSelectedBranchWorktree(t *testing.T) {
 func TestOpenPullRequestRejectsDetachedWorktree(t *testing.T) {
 	t.Parallel()
 
-	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, &stubEditorService{}, "/repo")
+	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, &stubEditorService{}, &stubTerminalService{}, "/repo")
 	model.worktrees = []git.Worktree{{
 		Path:       "/repo/detached",
 		Branch:     "detached",
@@ -807,7 +875,7 @@ func TestOpenPullRequestRejectsDetachedWorktree(t *testing.T) {
 func TestOutputModeSpaceReturnsToList(t *testing.T) {
 	t.Parallel()
 
-	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, &stubEditorService{}, "/repo")
+	model := New(config.Defaults(), &stubGitService{}, &stubCommandService{}, &stubEditorService{}, &stubTerminalService{}, "/repo")
 	model.state = ui.ModeOutput
 	model.statusMessage = "Command finished."
 	model.errorMessage = "stale"
