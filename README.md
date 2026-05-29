@@ -17,6 +17,7 @@
 - Stages all files in the selected worktree with `git add .`
 - Opens a commit message prompt and runs `git commit -m "..."` in the selected worktree
 - Displays command output directly inside the TUI
+- Optionally auto-refreshes the worktree list and status on a configurable interval
 
 ## Install
 
@@ -100,6 +101,7 @@ editor:
 git:
   base_branch: "origin/main"
   fetch_on_refresh: false
+  auto_refresh_interval: "0s"
   show_remote_status: true
   show_merge_status: true
   show_dirty_status: true
@@ -113,6 +115,7 @@ Config notes:
 
 - `git.base_branch`: branch or ref used for merge checks, such as `origin/main`
 - `git.fetch_on_refresh`: if `true`, `r` runs `git fetch --prune` before status refresh
+- `git.auto_refresh_interval`: duration such as `30s` or `2m`; `0s` disables automatic refresh. Auto-refresh runs only on the main list view and uses the same refresh behavior as `r`.
 - `git.show_remote_status`: show `local` and `↑N` / `↓N` badges
 - `git.show_merge_status`: show `merged` / `not merged` badges
 - `git.show_dirty_status`: show `clean` / `dirty` badges

@@ -5,9 +5,38 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+type Duration struct {
+	time.Duration
+}
+
+func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind != yaml.ScalarNode {
+		return fmt.Errorf("duration must be a scalar value")
+	}
+
+	raw := strings.TrimSpace(value.Value)
+	if raw == "" {
+		d.Duration = 0
+		return nil
+	}
+
+	parsed, err := time.ParseDuration(raw)
+	if err != nil {
+		return fmt.Errorf("parse duration %q: %w", raw, err)
+	}
+	if parsed < 0 {
+		return fmt.Errorf("duration %q must be non-negative", raw)
+	}
+
+	d.Duration = parsed
+	return nil
+}
 
 type Config struct {
 	DefaultCommand string       `yaml:"default_command"`
@@ -31,11 +60,12 @@ type EditorConfig struct {
 }
 
 type GitConfig struct {
-	BaseBranch       string `yaml:"base_branch"`
-	FetchOnRefresh   bool   `yaml:"fetch_on_refresh"`
-	ShowRemoteStatus bool   `yaml:"show_remote_status"`
-	ShowMergeStatus  bool   `yaml:"show_merge_status"`
-	ShowDirtyStatus  bool   `yaml:"show_dirty_status"`
+	BaseBranch          string   `yaml:"base_branch"`
+	FetchOnRefresh      bool     `yaml:"fetch_on_refresh"`
+	AutoRefreshInterval Duration `yaml:"auto_refresh_interval"`
+	ShowRemoteStatus    bool     `yaml:"show_remote_status"`
+	ShowMergeStatus     bool     `yaml:"show_merge_status"`
+	ShowDirtyStatus     bool     `yaml:"show_dirty_status"`
 }
 
 type UIConfig struct {
@@ -59,11 +89,12 @@ func Defaults() Config {
 			Args:    []string{"."},
 		},
 		Git: GitConfig{
-			BaseBranch:       "origin/main",
-			FetchOnRefresh:   false,
-			ShowRemoteStatus: true,
-			ShowMergeStatus:  true,
-			ShowDirtyStatus:  true,
+			BaseBranch:          "origin/main",
+			FetchOnRefresh:      false,
+			AutoRefreshInterval: Duration{Duration: 0},
+			ShowRemoteStatus:    true,
+			ShowMergeStatus:     true,
+			ShowDirtyStatus:     true,
 		},
 		UI: UIConfig{
 			ShowCommitHash:  true,

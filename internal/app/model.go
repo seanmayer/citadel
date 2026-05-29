@@ -33,6 +33,7 @@ type EditorService interface {
 type worktreesLoadedMsg struct {
 	worktrees []git.Worktree
 	err       error
+	silent    bool
 }
 
 type commandFinishedMsg struct {
@@ -42,31 +43,37 @@ type commandFinishedMsg struct {
 	successMessage string
 }
 
+type autoRefreshTickMsg struct {
+	token int
+}
+
 type Model struct {
-	config              config.Config
-	gitService          GitService
-	commandService      CommandService
-	editorService       EditorService
-	repoRoot            string
-	currentWorktreePath string
-	worktrees           []git.Worktree
-	selected            int
-	top                 int
-	width               int
-	height              int
-	state               ui.Mode
-	previousState       ui.Mode
-	renderer            ui.Renderer
-	keys                ui.KeyMap
-	commandInput        *commands.InputModel
-	branchInput         *commands.InputModel
-	commitInput         *commands.InputModel
-	outputViewport      viewport.Model
-	deleteTarget        git.Worktree
-	deleteOptions       git.DeleteOptions
-	lastCommand         string
-	statusMessage       string
-	errorMessage        string
+	config               config.Config
+	gitService           GitService
+	commandService       CommandService
+	editorService        EditorService
+	repoRoot             string
+	currentWorktreePath  string
+	worktrees            []git.Worktree
+	selected             int
+	top                  int
+	width                int
+	height               int
+	state                ui.Mode
+	previousState        ui.Mode
+	renderer             ui.Renderer
+	keys                 ui.KeyMap
+	commandInput         *commands.InputModel
+	branchInput          *commands.InputModel
+	commitInput          *commands.InputModel
+	outputViewport       viewport.Model
+	deleteTarget         git.Worktree
+	deleteOptions        git.DeleteOptions
+	lastCommand          string
+	statusMessage        string
+	errorMessage         string
+	autoRefreshToken     int
+	pendingWorktreeLoads int
 }
 
 func New(cfg config.Config, gitService GitService, commandService CommandService, editorService EditorService, currentWorktreePath string) *Model {
@@ -89,7 +96,10 @@ func New(cfg config.Config, gitService GitService, commandService CommandService
 }
 
 func (m *Model) Init() tea.Cmd {
-	return m.loadWorktreesCmd(false)
+	return tea.Batch(
+		m.beginWorktreeLoad(false, false),
+		m.scheduleAutoRefreshCmd(),
+	)
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -103,9 +113,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case worktreesLoadedMsg:
+		m.finishWorktreeLoad()
 		if msg.err != nil {
 			m.errorMessage = msg.err.Error()
-			return m, nil
+			return m, m.scheduleAutoRefreshCmd()
 		}
 		m.worktrees = msg.worktrees
 		if len(m.worktrees) == 0 {
@@ -115,11 +126,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selected = len(m.worktrees) - 1
 		}
 		m.ensureSelectionVisible()
-		if m.state != ui.ModeOutput {
+		if !msg.silent && m.state != ui.ModeOutput {
 			m.statusMessage = fmt.Sprintf("Loaded %d worktree(s)", len(m.worktrees))
 		}
 		m.errorMessage = ""
-		return m, nil
+		return m, m.scheduleAutoRefreshCmd()
+	case autoRefreshTickMsg:
+		if msg.token != m.autoRefreshToken {
+			return m, nil
+		}
+		if m.pendingWorktreeLoads > 0 || !m.shouldAutoRefresh() {
+			return m, m.scheduleAutoRefreshCmd()
+		}
+		return m, m.beginWorktreeLoad(false, true)
 	case commandFinishedMsg:
 		var validationErr *commands.ValidationError
 		if errors.As(msg.err, &validationErr) {
@@ -142,7 +161,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.outputViewport.SetContent(msg.result.Output)
 		m.outputViewport.GotoTop()
 		if msg.refresh {
-			return m, m.loadWorktreesCmd(false)
+			return m, m.beginWorktreeLoad(false, false)
 		}
 		return m, nil
 	}
@@ -202,11 +221,11 @@ func (m *Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case key.Matches(keyMsg, m.keys.Refresh):
 		m.statusMessage = "Refreshing worktrees..."
 		m.errorMessage = ""
-		return m, m.loadWorktreesCmd(false)
+		return m, m.beginWorktreeLoad(false, false)
 	case key.Matches(keyMsg, m.keys.FetchRefresh):
 		m.statusMessage = "Fetching remote state and refreshing worktrees..."
 		m.errorMessage = ""
-		return m, m.loadWorktreesCmd(true)
+		return m, m.beginWorktreeLoad(true, false)
 	case key.Matches(keyMsg, m.keys.Up):
 		if m.selected > 0 {
 			m.selected--
@@ -499,7 +518,18 @@ func (m *Model) updateHelp(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) loadWorktreesCmd(forceFetch bool) tea.Cmd {
+func (m *Model) beginWorktreeLoad(forceFetch bool, silent bool) tea.Cmd {
+	m.pendingWorktreeLoads++
+	return m.loadWorktreesCmd(forceFetch, silent)
+}
+
+func (m *Model) finishWorktreeLoad() {
+	if m.pendingWorktreeLoads > 0 {
+		m.pendingWorktreeLoads--
+	}
+}
+
+func (m *Model) loadWorktreesCmd(forceFetch bool, silent bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -511,8 +541,26 @@ func (m *Model) loadWorktreesCmd(forceFetch bool) tea.Cmd {
 		return worktreesLoadedMsg{
 			worktrees: worktrees,
 			err:       err,
+			silent:    silent,
 		}
 	}
+}
+
+func (m *Model) scheduleAutoRefreshCmd() tea.Cmd {
+	interval := m.config.Git.AutoRefreshInterval.Duration
+	if interval <= 0 {
+		return nil
+	}
+
+	m.autoRefreshToken++
+	token := m.autoRefreshToken
+	return tea.Tick(interval, func(time.Time) tea.Msg {
+		return autoRefreshTickMsg{token: token}
+	})
+}
+
+func (m *Model) shouldAutoRefresh() bool {
+	return m.state == ui.ModeList
 }
 
 func (m *Model) executeCommandCmd(worktreePath string, raw string, refresh bool, successMessage string) tea.Cmd {
