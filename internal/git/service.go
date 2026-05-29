@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type Worktree struct {
@@ -85,6 +86,7 @@ func (execRunner) Run(dir string, name string, args ...string) (stdout string, s
 
 type Service struct {
 	runner CommandRunner
+	now    func() time.Time
 }
 
 func NewService(runner CommandRunner) *Service {
@@ -92,7 +94,10 @@ func NewService(runner CommandRunner) *Service {
 		runner = execRunner{}
 	}
 
-	return &Service{runner: runner}
+	return &Service{
+		runner: runner,
+		now:    time.Now,
+	}
 }
 
 func (s *Service) DetectRepoRoot(ctx context.Context, cwd string) (string, error) {
@@ -217,6 +222,87 @@ func (s *Service) DeleteWorktree(ctx context.Context, repoRoot string, worktree 
 		if branchErr != nil {
 			return strings.Join(transcript, "\n\n"), branchErr
 		}
+	}
+
+	return strings.Join(transcript, "\n\n"), nil
+}
+
+func (s *Service) ExecuteHotPush(ctx context.Context, worktreePath string) (string, error) {
+	const hotPushMessage = "hot push"
+
+	transcript := make([]string, 0, 6)
+	appendStep := func(command string, output string) {
+		transcript = append(transcript, formatCommandTranscript(command, output))
+	}
+
+	fetchArgs := []string{"fetch", "--prune"}
+	fetchOutput, err := s.ExecuteGitCommand(ctx, worktreePath, fetchArgs)
+	appendStep(displayCommand(fetchArgs), fetchOutput)
+	if err != nil {
+		return strings.Join(transcript, "\n\n"), err
+	}
+
+	upstream, hasUpstream, err := s.GetUpstream(ctx, worktreePath)
+	if err != nil {
+		return strings.Join(transcript, "\n\n"), err
+	}
+
+	pullArgs := []string{"pull", "--rebase", "--autostash"}
+	if hasUpstream {
+		pullOutput, pullErr := s.ExecuteGitCommand(ctx, worktreePath, pullArgs)
+		appendStep(displayCommand(pullArgs), pullOutput)
+		if pullErr != nil {
+			return strings.Join(transcript, "\n\n"), pullErr
+		}
+	} else {
+		appendStep(displayCommand(pullArgs), "(skipped: no upstream branch)")
+	}
+
+	addArgs := []string{"add", "."}
+	addOutput, err := s.ExecuteGitCommand(ctx, worktreePath, addArgs)
+	appendStep(displayCommand(addArgs), addOutput)
+	if err != nil {
+		return strings.Join(transcript, "\n\n"), err
+	}
+
+	commitArgs := []string{"commit", "-m", hotPushMessage}
+	commitOutput, err := s.ExecuteGitCommand(ctx, worktreePath, commitArgs)
+	appendStep(displayCommand(commitArgs), commitOutput)
+	if err != nil && !isNothingToCommitMessage(commitOutput) {
+		return strings.Join(transcript, "\n\n"), err
+	}
+
+	remoteName, err := s.resolvePushRemote(ctx, worktreePath, upstream, hasUpstream)
+	if err != nil {
+		return strings.Join(transcript, "\n\n"), err
+	}
+
+	branchName, err := s.CurrentBranch(ctx, worktreePath)
+	if err != nil {
+		return strings.Join(transcript, "\n\n"), err
+	}
+
+	initialFallbackBranch := hotPushFallbackBranchName(branchName, s.now())
+	pushArgs := hotPushPushArgs(remoteName, branchName, hasUpstream, initialFallbackBranch)
+	pushOutput, err := s.ExecuteGitCommand(ctx, worktreePath, pushArgs)
+	appendStep(displayCommand(pushArgs), pushOutput)
+	if err == nil {
+		return strings.Join(transcript, "\n\n"), nil
+	}
+	if !isRemotePushConflict(pushOutput) {
+		return strings.Join(transcript, "\n\n"), err
+	}
+
+	fallbackBranch := initialFallbackBranch
+	if len(pushArgs) >= 4 && pushArgs[3] == "HEAD:"+fallbackBranch {
+		fallbackBranch += "-1"
+	}
+
+	fallbackPushArgs := []string{"push", "-u", remoteName, "HEAD:" + fallbackBranch}
+	fallbackOutput, fallbackErr := s.ExecuteGitCommand(ctx, worktreePath, fallbackPushArgs)
+	appendStep(displayCommand(fallbackPushArgs), fallbackOutput)
+	if fallbackErr != nil {
+		return strings.Join(transcript, "\n\n"), fallbackErr
 	}
 
 	return strings.Join(transcript, "\n\n"), nil
@@ -368,6 +454,60 @@ func samePath(a string, b string) bool {
 	return normalizePath(a) == normalizePath(b)
 }
 
+func (s *Service) CurrentBranch(ctx context.Context, worktreePath string) (string, error) {
+	stdout, stderr, exitCode, err := s.run(ctx, worktreePath, "git", "branch", "--show-current")
+	if err != nil {
+		return "", fmt.Errorf("load current branch for %q: %w", worktreePath, err)
+	}
+	if exitCode != 0 {
+		message := strings.TrimSpace(firstNonEmpty(stderr, stdout))
+		if message == "" {
+			message = "git branch --show-current returned a non-zero exit status"
+		}
+		return "", fmt.Errorf("load current branch for %q: %s", worktreePath, message)
+	}
+
+	return strings.TrimSpace(stdout), nil
+}
+
+func (s *Service) DefaultRemoteName(ctx context.Context, worktreePath string) (string, error) {
+	stdout, stderr, exitCode, err := s.run(ctx, worktreePath, "git", "remote")
+	if err != nil {
+		return "", fmt.Errorf("load remotes for %q: %w", worktreePath, err)
+	}
+	if exitCode != 0 {
+		message := strings.TrimSpace(firstNonEmpty(stderr, stdout))
+		if message == "" {
+			message = "git remote returned a non-zero exit status"
+		}
+		return "", fmt.Errorf("load remotes for %q: %s", worktreePath, message)
+	}
+
+	remotes := strings.Fields(stdout)
+	if len(remotes) == 0 {
+		return "", fmt.Errorf("load remotes for %q: no Git remotes are configured", worktreePath)
+	}
+
+	for _, remote := range remotes {
+		if remote == "origin" {
+			return remote, nil
+		}
+	}
+
+	return remotes[0], nil
+}
+
+func (s *Service) resolvePushRemote(ctx context.Context, worktreePath string, upstream string, hasUpstream bool) (string, error) {
+	if hasUpstream {
+		remote := remoteNameFromUpstream(upstream)
+		if remote != "" {
+			return remote, nil
+		}
+	}
+
+	return s.DefaultRemoteName(ctx, worktreePath)
+}
+
 func combinedText(stdout string, stderr string) string {
 	stdout = strings.TrimRight(stdout, "\n")
 	stderr = strings.TrimRight(stderr, "\n")
@@ -406,4 +546,56 @@ func formatCommandTranscript(command string, output string) string {
 	}
 
 	return command + "\n" + output
+}
+
+func hotPushPushArgs(remoteName string, branchName string, hasUpstream bool, fallbackBranch string) []string {
+	if hasUpstream {
+		return []string{"push"}
+	}
+
+	targetBranch := strings.TrimSpace(branchName)
+	if targetBranch == "" {
+		targetBranch = fallbackBranch
+	}
+
+	return []string{"push", "-u", remoteName, "HEAD:" + targetBranch}
+}
+
+func hotPushFallbackBranchName(branchName string, now time.Time) string {
+	base := strings.Trim(strings.ReplaceAll(strings.TrimSpace(branchName), " ", "-"), "/")
+	if base == "" {
+		return fmt.Sprintf("hot-push-%s", now.UTC().Format("20060102-150405"))
+	}
+
+	return fmt.Sprintf("%s-hot-push-%s", base, now.UTC().Format("20060102-150405"))
+}
+
+func remoteNameFromUpstream(upstream string) string {
+	upstream = strings.TrimSpace(upstream)
+	if upstream == "" {
+		return ""
+	}
+
+	parts := strings.SplitN(upstream, "/", 2)
+	if len(parts) == 0 {
+		return ""
+	}
+
+	return parts[0]
+}
+
+func isNothingToCommitMessage(message string) bool {
+	message = strings.ToLower(message)
+	return strings.Contains(message, "nothing to commit") ||
+		strings.Contains(message, "nothing added to commit") ||
+		strings.Contains(message, "no changes added to commit")
+}
+
+func isRemotePushConflict(message string) bool {
+	message = strings.ToLower(message)
+	return strings.Contains(message, "non-fast-forward") ||
+		strings.Contains(message, "updates were rejected because the remote contains work") ||
+		strings.Contains(message, "tip of your current branch is behind") ||
+		strings.Contains(message, "[rejected]") ||
+		strings.Contains(message, "fetch first")
 }

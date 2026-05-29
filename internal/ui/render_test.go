@@ -72,6 +72,7 @@ func TestRenderListShowsWorktreeActionList(t *testing.T) {
 		"Actions",
 		"open terminal command mode",
 		"git add .",
+		"hot push",
 		"commit files with a message",
 	} {
 		if !strings.Contains(view, snippet) {

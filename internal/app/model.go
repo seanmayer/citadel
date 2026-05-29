@@ -273,6 +273,19 @@ func (m *Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMessage = "Staging all changes..."
 		m.errorMessage = ""
 		return m, m.executeCommandCmd(worktree.Path, "git add .", true, "Staged all changes.")
+	case key.Matches(keyMsg, m.keys.HotPush):
+		worktree, ok := m.selectedWorktree()
+		if !ok {
+			return m, nil
+		}
+		if worktree.IsBare {
+			m.statusMessage = "Hot push was not run."
+			m.errorMessage = "Cannot run hot push in a bare worktree."
+			return m, nil
+		}
+		m.statusMessage = "Running hot push..."
+		m.errorMessage = ""
+		return m, m.executeCommandCmd(worktree.Path, "hot push", true, "Hot push completed.")
 	case key.Matches(keyMsg, m.keys.Commit):
 		worktree, ok := m.selectedWorktree()
 		if !ok {
@@ -367,9 +380,16 @@ func (m *Model) updateCommand(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			raw := m.commandInput.ResolvedValue()
+			refresh := false
+			successMessage := ""
 			m.statusMessage = "Running command..."
+			if commands.IsHotPush(raw) {
+				m.statusMessage = "Running hot push..."
+				refresh = true
+				successMessage = "Hot push completed."
+			}
 			m.errorMessage = ""
-			return m, m.executeCommandCmd(worktree.Path, raw, false, "")
+			return m, m.executeCommandCmd(worktree.Path, raw, refresh, successMessage)
 		}
 	}
 
